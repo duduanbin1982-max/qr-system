@@ -1,9 +1,11 @@
 import sqlite3
+import shutil
 import subprocess
 from contextlib import closing
 from pathlib import Path
 
 import pytest
+import conftest
 
 from scripts import backend_frontend_static_release as static_release
 from scripts import payroll_audit_v100_release as payroll_release
@@ -11,99 +13,45 @@ from scripts import payroll_audit_v100_release as payroll_release
 
 def _database(path, version=98):
     path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(conftest.TEST_TEMPLATE_DB, path)
     with closing(sqlite3.connect(path)) as db:
         db.execute("PRAGMA foreign_keys=ON")
-        db.executescript(
-            """
-            CREATE TABLE users(id INTEGER PRIMARY KEY);
-            CREATE TABLE payroll_batches(
-                id INTEGER PRIMARY KEY,
-                status TEXT NOT NULL,
-                superseded_by_batch_id INTEGER,
-                legacy_imported INTEGER NOT NULL DEFAULT 0,
-                payroll_month TEXT NOT NULL DEFAULT '',
-                version INTEGER NOT NULL DEFAULT 1,
-                period_start TEXT NOT NULL DEFAULT '',
-                period_end TEXT NOT NULL DEFAULT '',
-                source_cutoff_at TEXT NOT NULL DEFAULT '',
-                input_digest TEXT NOT NULL DEFAULT '',
-                normal_wage_cents INTEGER NOT NULL DEFAULT 0,
-                rework_wage_cents INTEGER NOT NULL DEFAULT 0,
-                bonus_cents INTEGER NOT NULL DEFAULT 0,
-                allowance_cents INTEGER NOT NULL DEFAULT 0,
-                deduction_cents INTEGER NOT NULL DEFAULT 0,
-                payable_wage_cents INTEGER NOT NULL DEFAULT 0,
-                source_record_count INTEGER NOT NULL DEFAULT 0,
-                priced_record_count INTEGER NOT NULL DEFAULT 0,
-                exception_count INTEGER NOT NULL DEFAULT 0,
-                prepared_by INTEGER,
-                prepared_at TEXT NOT NULL DEFAULT '',
-                row_version INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE payroll_employee_lines(
-                id INTEGER PRIMARY KEY,
-                batch_id INTEGER NOT NULL,
-                payable_wage_cents INTEGER NOT NULL DEFAULT 0,
-                FOREIGN KEY(batch_id) REFERENCES payroll_batches(id)
-            );
-            CREATE TABLE payroll_adjustments(
-                id INTEGER PRIMARY KEY,
-                reason TEXT NOT NULL
-            );
-            CREATE TABLE payroll_settlements(
-                id INTEGER PRIMARY KEY,
-                batch_id INTEGER NOT NULL,
-                FOREIGN KEY(batch_id) REFERENCES payroll_batches(id)
-            );
-            CREATE TABLE payroll_export_items(
-                id INTEGER PRIMARY KEY,
-                export_batch_id INTEGER NOT NULL,
-                payable_cents INTEGER NOT NULL
-            );
-            CREATE TABLE preserved_facts(id INTEGER PRIMARY KEY, value TEXT NOT NULL);
-            """
+        if version == payroll_release.SOURCE_SCHEMA:
+            for trigger in (
+                "trg_payroll_audit_finding_definition_immutable",
+                "trg_payroll_audit_finding_resolution_once",
+                "trg_payroll_audit_finding_no_delete",
+                "prevent_invalid_payroll_batch_transition",
+                "protect_payroll_batch_amounts",
+                "protect_payroll_audit_rule_version",
+            ):
+                db.execute(f'DROP TRIGGER IF EXISTS "{trigger}"')
+            db.execute("DROP TABLE payroll_audit_findings")
+            db.execute("ALTER TABLE payroll_batches DROP COLUMN audit_rule_version")
+            db.execute("ALTER TABLE payroll_batches DROP COLUMN audit_run_version")
+            db.execute(f"PRAGMA user_version={payroll_release.SOURCE_SCHEMA}")
+        elif version != payroll_release.TARGET_SCHEMA:
+            raise ValueError(f"unsupported test schema version: {version}")
+        db.execute(
+            "INSERT INTO users(id, username, password, name, role) "
+            "VALUES (999999, 'release-test', 'x', 'Release Test', 'admin')"
         )
-        for table in sorted(
-            payroll_release.REQUIRED_TABLES
-            - {
-                "payroll_audit_findings",
-                "payroll_batches",
-                "payroll_employee_lines",
-                "payroll_adjustments",
-                "payroll_settlements",
-                "payroll_export_items",
-            }
-        ):
-            db.execute(f'CREATE TABLE "{table}" (id INTEGER PRIMARY KEY)')
-        v98_triggers = payroll_release.REQUIRED_TRIGGERS - {
-            "trg_payroll_settlement_current_batch_insert",
-            "trg_payroll_settlement_batch_immutable",
-            "trg_payroll_settled_batch_immutable",
-            "trg_payroll_batch_nonnegative_transition",
-            "trg_payroll_employee_line_insert_immutable",
-            "trg_payroll_export_item_nonnegative",
-            "trg_payroll_audit_finding_definition_immutable",
-            "trg_payroll_audit_finding_resolution_once",
-            "trg_payroll_audit_finding_no_delete",
-            "prevent_invalid_payroll_batch_transition",
-            "protect_payroll_batch_amounts",
-            "protect_payroll_audit_rule_version",
-        }
-        for trigger in sorted(v98_triggers):
-            db.execute(
-                f'CREATE TRIGGER "{trigger}" BEFORE INSERT ON preserved_facts '
-                "BEGIN SELECT 1; END"
-            )
-        db.execute("INSERT INTO users(id) VALUES (1)")
-        db.execute("INSERT INTO payroll_batches(id, status) VALUES (1, 'draft')")
-        db.execute("INSERT INTO payroll_employee_lines(id, batch_id, payable_wage_cents) VALUES (1, 1, 12500)")
-        db.execute("INSERT INTO payroll_adjustments(id, reason) VALUES (1, 'preserve')")
+        db.execute(
+            "INSERT INTO payroll_batches(id, payroll_month, version, period_start, period_end, "
+            "source_cutoff_at, status) VALUES (1, '2026-01', 1, '2026-01-01', "
+            "'2026-01-31', '2026-02-01', 'draft')"
+        )
+        db.execute(
+            "INSERT INTO payroll_employee_lines(id, batch_id, employee_name_snapshot, payable_wage_cents) "
+            "VALUES (1, 1, 'Release Test', 12500)"
+        )
+        db.execute(
+            "INSERT INTO payroll_adjustments(id, employee_name_snapshot, payroll_month, "
+            "adjustment_type, amount_cents, reason) VALUES (1, 'Release Test', '2026-01', "
+            "'bonus', 100, 'preserve')"
+        )
+        db.execute("CREATE TABLE preserved_facts(id INTEGER PRIMARY KEY, value TEXT NOT NULL)")
         db.execute("INSERT INTO preserved_facts VALUES (1, 'unchanged')")
-        db.commit()
-        from modules.migration_payroll_risk_closure import m098_payroll_risk_closure
-
-        m098_payroll_risk_closure(db)
-        db.execute(f"PRAGMA user_version={version}")
         db.commit()
     return path
 
@@ -171,6 +119,109 @@ def test_generic_static_gate_still_rejects_migrations_and_tests():
         )
 
 
+@pytest.mark.parametrize(
+    ("corruption", "message"),
+    [
+        ("column", "columns"),
+        ("column-definition", "invalid_column_definitions"),
+        ("index", "invalid_indexes"),
+        ("trigger", "invalid_triggers"),
+    ],
+)
+def test_schema_acceptance_rejects_wrong_v100_columns_indexes_and_triggers(
+    tmp_path, corruption, message
+):
+    database = _database(tmp_path / "schema.db", version=payroll_release.TARGET_SCHEMA)
+    with closing(sqlite3.connect(database)) as db:
+        if corruption == "column":
+            db.execute(
+                "ALTER TABLE payroll_reconciliation_items DROP COLUMN detail_json"
+            )
+        elif corruption == "column-definition":
+            db.execute(
+                "ALTER TABLE payroll_reconciliation_items DROP COLUMN detail_json"
+            )
+            db.execute(
+                "ALTER TABLE payroll_reconciliation_items "
+                "ADD COLUMN detail_json INTEGER NOT NULL DEFAULT 1"
+            )
+        elif corruption == "index":
+            db.execute("DROP INDEX idx_payroll_audit_findings_current")
+            db.execute(
+                "CREATE INDEX idx_payroll_audit_findings_current "
+                "ON payroll_audit_findings(subject_id)"
+            )
+        else:
+            db.execute("DROP TRIGGER protect_closed_payroll_settlement")
+            db.execute(
+                "CREATE TRIGGER protect_closed_payroll_settlement "
+                "BEFORE UPDATE ON payroll_settlements "
+                "BEGIN SELECT 1; END"
+            )
+        db.commit()
+
+    with pytest.raises(RuntimeError, match=message):
+        payroll_release._schema_acceptance(database, payroll_release.TARGET_SCHEMA)
+
+
+@pytest.mark.parametrize("mismatch", ["directory", "sha"])
+def test_production_migration_rejects_unverified_target_root(tmp_path, monkeypatch, mismatch):
+    project = tmp_path / "production-target"
+    other_target = tmp_path / "other-target"
+    project.mkdir()
+    other_target.mkdir()
+    database = tmp_path / "production.db"
+    database.touch()
+    manifest = {
+        "scope": payroll_release.deployment_manifest.DEPLOYMENT_SCOPE_BACKEND_FRONTEND_MIGRATION,
+        "status": "backup_verified",
+        "before_commit": payroll_release.BASELINE_COMMIT,
+        "target_commit": payroll_release.TARGET_COMMIT,
+    }
+    monkeypatch.setattr(
+        payroll_release.deployment_manifest,
+        "read_json",
+        lambda _path: {},
+    )
+    monkeypatch.setattr(
+        payroll_release.deployment_manifest,
+        "require_schema",
+        lambda *_args: manifest,
+    )
+    monkeypatch.setattr(
+        payroll_release.deployment_manifest,
+        "_active_fence_for_manifest",
+        lambda _manifest: None,
+    )
+    observed_head = (
+        payroll_release.BASELINE_COMMIT if mismatch == "sha" else payroll_release.TARGET_COMMIT
+    )
+    monkeypatch.setattr(
+        payroll_release,
+        "_git",
+        lambda *_args, **_kwargs: observed_head,
+    )
+    target_root = other_target if mismatch == "directory" else project
+
+    expected_error = "migration target root" if mismatch == "directory" else "target checkout"
+    with pytest.raises(RuntimeError, match=expected_error):
+        payroll_release.migrate_production(
+            target_root,
+            database,
+            tmp_path / "manifest.json",
+            project,
+        )
+
+
+def test_database_space_estimate_includes_sqlite_wal_file(tmp_path):
+    database = tmp_path / "production.db"
+    database.write_bytes(b"database")
+    wal = Path(str(database) + "-wal")
+    wal.write_bytes(b"live-wal-pages")
+
+    assert payroll_release._database_footprint(database) == database.stat().st_size + wal.stat().st_size
+
+
 def test_launcher_keeps_v100_migration_inside_the_backup_fence_and_rollback_flow():
     repository = Path(__file__).resolve().parents[1]
     launcher = (repository / "scripts/deploy-payroll-audit-v100.sh").read_text(
@@ -219,8 +270,9 @@ def test_v100_replica_trial_preserves_v98_facts_and_is_idempotent(tmp_path):
         assert db.execute("SELECT reason FROM payroll_adjustments WHERE id=1").fetchone()[0] == "preserve"
 
 
-def test_preflight_accepts_only_reviewed_tool_commit_and_v98_production(tmp_path):
+def test_preflight_accepts_only_reviewed_tool_commit_and_v98_production(tmp_path, monkeypatch):
     repository = Path(__file__).resolve().parents[1]
+    monkeypatch.setattr(payroll_release, "_assert_clean", lambda *_args, **_kwargs: None)
     project = tmp_path / "production"
     subprocess.run(
         [

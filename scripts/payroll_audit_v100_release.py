@@ -174,8 +174,66 @@ REQUIRED_TRIGGERS = {
     "protect_payroll_audit_rule_version",
 }
 REQUIRED_COLUMNS = {
-    "payroll_adjustments": {"idempotency_key", "request_digest"},
-    "payroll_batches": {"audit_run_version", "audit_rule_version"},
+    "payroll_adjustments": {
+        "id", "employee_id", "employee_name_snapshot", "employee_no_snapshot", "payroll_month",
+        "adjustment_type", "amount_cents", "reason", "created_by", "created_by_name",
+        "created_at", "reversal_of_id", "replacement_for_id", "legacy_wage_adjustment_id",
+        "idempotency_key", "request_digest",
+    },
+    "payroll_batches": {
+        "id", "payroll_month", "version", "period_start", "period_end", "status",
+        "source_cutoff_at", "input_digest", "idempotency_key", "normal_wage_cents",
+        "rework_wage_cents", "bonus_cents", "allowance_cents", "deduction_cents",
+        "payable_wage_cents", "source_record_count", "priced_record_count", "exception_count",
+        "prepared_by", "prepared_by_name", "prepared_at", "submitted_at", "locked_by",
+        "locked_by_name", "locked_at", "confirmed_by", "confirmed_by_name", "confirmed_at",
+        "voided_by", "voided_by_name", "voided_at", "void_reason", "supersedes_batch_id",
+        "superseded_by_batch_id", "revision_reason", "legacy_imported", "row_version",
+        "created_at", "updated_at", "audit_run_version", "audit_rule_version",
+    },
+    "payroll_settlements": {
+        "id", "batch_id", "status", "expected_total_cents", "successful_paid_cents",
+        "difference_cents", "blocking_difference_count", "current_export_batch_id",
+        "latest_reconciliation_run_id", "row_version", "created_by", "created_by_name",
+        "created_at", "updated_at",
+    },
+    "payroll_export_batches": {
+        "id", "settlement_id", "export_version", "status", "row_count", "total_cents",
+        "content_sha256", "csv_content_blob", "idempotency_key", "created_by",
+        "created_by_name", "created_at", "superseded_at", "superseded_by_export_id",
+    },
+    "payroll_export_items": {
+        "id", "export_batch_id", "employee_line_id", "employee_id", "employee_no_snapshot",
+        "employee_name_snapshot", "payable_cents", "payment_reference", "sequence_no", "created_at",
+    },
+    "payroll_receipt_batches": {
+        "id", "export_batch_id", "status", "source_filename", "content_sha256",
+        "accepted_row_count", "failed_row_count", "idempotency_key", "uploaded_by",
+        "uploaded_by_name", "uploaded_at",
+    },
+    "payroll_receipt_items": {
+        "id", "receipt_batch_id", "row_number", "payment_reference", "employee_no_snapshot",
+        "employee_name_snapshot", "paid_cents", "payment_status", "paid_at",
+        "external_transaction_no", "failure_reason", "validation_status", "validation_error", "created_at",
+    },
+    "payroll_reconciliation_runs": {
+        "id", "settlement_id", "export_batch_id", "run_version", "status",
+        "expected_total_cents", "successful_paid_cents", "difference_cents", "blocking_count",
+        "receipt_digest", "idempotency_key", "executed_by", "executed_by_name", "executed_at",
+    },
+    "payroll_reconciliation_items": {
+        "id", "reconciliation_run_id", "export_item_id", "payment_reference", "expected_cents",
+        "successful_paid_cents", "difference_cents", "difference_type", "blocking", "detail_json",
+    },
+    "payroll_reconciliation_resolutions": {
+        "id", "reconciliation_item_id", "receipt_item_id", "resolution_code", "resolution_reason",
+        "idempotency_key", "resolved_by", "resolved_by_name", "resolved_at",
+    },
+    "payroll_close_records": {
+        "id", "settlement_id", "export_batch_id", "reconciliation_run_id", "expected_total_cents",
+        "successful_paid_cents", "close_digest", "close_reason", "idempotency_key", "closed_by",
+        "closed_by_name", "closed_at",
+    },
     "payroll_audit_findings": {
         "id",
         "batch_id",
@@ -198,6 +256,55 @@ REQUIRED_INDEXES = {
     "idx_payroll_adjustment_idempotency",
     "idx_payroll_audit_findings_current",
     "idx_payroll_audit_findings_subject",
+}
+REQUIRED_INDEX_DEFINITIONS = {
+    "idx_payroll_adjustment_idempotency": (
+        "payroll_adjustments", ("idempotency_key",), True, True,
+    ),
+    "idx_payroll_audit_findings_current": (
+        "payroll_audit_findings",
+        ("batch_id", "calculation_version", "status", "severity", "finding_type"),
+        False,
+        False,
+    ),
+    "idx_payroll_audit_findings_subject": (
+        "payroll_audit_findings", ("subject_type", "subject_id", "finding_type"), False, False,
+    ),
+}
+REQUIRED_COLUMN_SIGNATURE_SHA256 = {
+    "payroll_audit_findings": "cc35c149dd7f085d35d98012c3d2a26e78ba4b9884f226accc3bf4ea9e7bb8b8",
+    "payroll_adjustments": "569326114fd5bd6f4aaf882dde6269c7a95d38691655a13cca0804728225c530",
+    "payroll_batches": "963c3b4665a6f9df45836f0025d1db057b99f258e471c59bbe8c33bcd9eeff5b",
+    "payroll_close_records": "12d3e5d6356f9ac9658108ce6e3e8e49a26674d9d964735127c1b944df25c7a7",
+    "payroll_export_batches": "9fa808e9560ede7399a7070b631a0b8ad4e84df04549eb7cdb4cbdf442a396d4",
+    "payroll_export_items": "77fe730ecd5209197a448b7a021d8be91cef47bbcaa3b074598b80b97bd13caf",
+    "payroll_receipt_batches": "5d0ace349c34bd2037e169659e85894233debc88c9a89e1c95abf6932d3fe5b3",
+    "payroll_receipt_items": "4f29c94794b7a6adfdbdfeea819731639677716546c8eebddead29b5241c6021",
+    "payroll_reconciliation_items": "b1a86d3d30999070c1b21b4fc6621a09dd86f8ec5e593634c4c4c61699abcf6f",
+    "payroll_reconciliation_resolutions": "b61adf0837d4fa76d595b5715119ea488d769a7e5defa110858fe37baf5e4a2e",
+    "payroll_reconciliation_runs": "437b15ee39b81a61c1b8b80bf8b8bbb528c805fc6f3712490a1cf92834d25ebc",
+    "payroll_settlements": "4645dbdf0f1cb27df18abf1ccf6df529545747c008d9bf00d4ea66546c844225",
+}
+REQUIRED_TRIGGER_SHA256 = {
+    "prevent_closed_payroll_export_batch_insert": "d3b7fd8c7fab059dc0a4ca428a3b15ff52dca76abbf70bedb0d3138045a45c4d",
+    "prevent_closed_payroll_receipt_batch_insert": "ba1ad2913638990745d04c7955b5048b1b7fc293fa6898985eff2b4e97db3fbb",
+    "prevent_closed_payroll_reconciliation_run_insert": "573b2ab786fe9ebea89ef5e38d1e93726342c7d38ae666197a7d933d70eb8e69",
+    "protect_payroll_export_item_update": "c226c3b14c0e3407a7afcdbc4041a31b9aa1ca001be73e14bb290e694fc01c01",
+    "protect_payroll_close_record_delete": "42c398b9b491ca188f756cefe39f93c1e19d3ca10481a0393dfffa5b18e3cfcc",
+    "protect_closed_payroll_settlement": "456507097e9a4c8a10c9cd6a543a0104de09c00e6991ff7b13adf8f02cef4931",
+    "prevent_payroll_settlement_delete": "62b768b133a1f4d9c5fa40c367e0987b92ac5ad5c9d6f91c528df02dfbb0af6d",
+    "trg_payroll_settlement_current_batch_insert": "ab8c176fbe3a415c2367d9d7da0b4991dcd63b747cea5d966fc6fd12b1d8c95f",
+    "trg_payroll_settlement_batch_immutable": "d3b3cc8fd0897e2aece88dcfd3777414dd83fa9da69ce44b200f25c5243e37ed",
+    "trg_payroll_settled_batch_immutable": "90b35b6f2e0328efd84e6feaa3c405316c3869ce706143558905cf0df8ac516a",
+    "trg_payroll_batch_nonnegative_transition": "6cc00fbf85142c2e1b164410521b700c4369fa81000103bc43f03824b6760934",
+    "trg_payroll_employee_line_insert_immutable": "d12a593d97cdfc055ba5e813707f2f164f56919075815c1ddac92c6e3f5c7360",
+    "trg_payroll_export_item_nonnegative": "ed398e578c7e41dd2a448ddc2556204c3ec8196982530031d6a9ceb9789d9cf2",
+    "trg_payroll_audit_finding_definition_immutable": "673fb7b92b45c2a24cd4e45c4029b069ed60c69097df1e1b56fae43e3671eb81",
+    "trg_payroll_audit_finding_resolution_once": "420d1393c9eb37fc7df08d2c35a3e85a3d5f9d1610961c5f98d23daae28ae33b",
+    "trg_payroll_audit_finding_no_delete": "c6eafe56e1fb38af37b2f049e532f097a89ccf796e1b5203e9dab8db74fa881f",
+    "prevent_invalid_payroll_batch_transition": "8352f1228e23f08e71a90e72bbdc0b2903505734efc223272fd2c275e3f26956",
+    "protect_payroll_batch_amounts": "782796915679dbf6611b9717c6669919d3b1c92f684835a1ac08b8fce78ce511",
+    "protect_payroll_audit_rule_version": "fb2f71b211c8b45c93169ca4707db976ee41695c1647006e48f202bc77018841",
 }
 MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024
 OFFLINE_MIGRATION_SECRET = "offline-payroll-audit-v100"
@@ -324,11 +431,36 @@ def _schema_acceptance(database, expected_version):
             )
         }
         columns = {}
+        column_signatures = {}
         for table in REQUIRED_COLUMNS:
             quoted = table.replace('"', '""')
-            columns[table] = {
-                row[1] for row in db.execute(f'PRAGMA table_info("{quoted}")')
-            }
+            table_info = list(db.execute(f'PRAGMA table_info("{quoted}")'))
+            columns[table] = {row[1] for row in table_info}
+            column_signatures[table] = hashlib.sha256(
+                json.dumps(
+                    [tuple(row[1:6]) for row in table_info], separators=(",", ":")
+                ).encode("utf-8")
+            ).hexdigest()
+        object_sql = {
+            (kind, name): sql
+            for kind, name, sql in db.execute(
+                "SELECT type, name, sql FROM sqlite_master "
+                "WHERE type IN ('index','trigger') AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+        index_definitions = {}
+        for name, (table, _expected_columns, _unique, _partial) in REQUIRED_INDEX_DEFINITIONS.items():
+            quoted = table.replace('"', '""')
+            row = next(
+                (row for row in db.execute(f'PRAGMA index_list("{quoted}")') if row[1] == name),
+                None,
+            )
+            if row is None:
+                continue
+            index_columns = tuple(
+                info[2] for info in db.execute(f'PRAGMA index_info("{name}")')
+            )
+            index_definitions[name] = (table, index_columns, bool(row[2]), bool(row[4]))
     missing_tables = sorted(REQUIRED_TABLES - tables)
     missing_triggers = sorted(REQUIRED_TRIGGERS - triggers)
     missing_indexes = sorted(REQUIRED_INDEXES - indexes)
@@ -337,17 +469,45 @@ def _schema_acceptance(database, expected_version):
         for table, required in REQUIRED_COLUMNS.items()
         if required - columns.get(table, set())
     }
-    if missing_tables or missing_triggers or missing_indexes or missing_columns:
+    invalid_column_definitions = {
+        table: column_signatures.get(table)
+        for table, digest in REQUIRED_COLUMN_SIGNATURE_SHA256.items()
+        if column_signatures.get(table) != digest
+    }
+    invalid_indexes = {
+        name: {"expected": expected, "actual": index_definitions.get(name)}
+        for name, expected in REQUIRED_INDEX_DEFINITIONS.items()
+        if index_definitions.get(name) != expected
+    }
+    invalid_triggers = {
+        name: hashlib.sha256((object_sql.get(("trigger", name)) or "").encode("utf-8")).hexdigest()
+        for name, digest in REQUIRED_TRIGGER_SHA256.items()
+        if hashlib.sha256((object_sql.get(("trigger", name)) or "").encode("utf-8")).hexdigest() != digest
+    }
+    if (
+        missing_tables
+        or missing_triggers
+        or missing_indexes
+        or missing_columns
+        or invalid_column_definitions
+        or invalid_indexes
+        or invalid_triggers
+    ):
         raise RuntimeError(
             "V100 acceptance missing "
             f"tables={missing_tables} triggers={missing_triggers} "
-            f"indexes={missing_indexes} columns={missing_columns}"
+            f"indexes={missing_indexes} columns={missing_columns}; "
+            f"invalid_column_definitions={sorted(invalid_column_definitions)} "
+            f"invalid_indexes={invalid_indexes} invalid_triggers={sorted(invalid_triggers)}"
         )
     return {
         **evidence,
         "required_tables": sorted(REQUIRED_TABLES),
         "required_triggers": sorted(REQUIRED_TRIGGERS),
         "required_indexes": sorted(REQUIRED_INDEXES),
+        "verified_trigger_count": len(REQUIRED_TRIGGER_SHA256),
+        "verified_column_definition_count": len(REQUIRED_COLUMN_SIGNATURE_SHA256),
+        "verified_index_definitions": sorted(REQUIRED_INDEX_DEFINITIONS),
         "required_columns": {
             table: sorted(required) for table, required in REQUIRED_COLUMNS.items()
         },
@@ -388,6 +548,15 @@ def _run_target_migrations(target_root, database):
     result_line = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
     if not result_line.endswith(f":{TARGET_SCHEMA}"):
         raise RuntimeError("target migration returned unexpected version: " + result.stdout.strip())
+
+
+def _database_footprint(database):
+    database = Path(database)
+    size = database.stat().st_size
+    wal = Path(str(database) + "-wal")
+    if wal.is_file() and not wal.is_symlink():
+        size += wal.stat().st_size
+    return size
 
 
 def _copy_database(source, target):
@@ -538,7 +707,7 @@ def validate_release(tool_root, project_root, database, before_commit, target_co
     free_bytes = shutil.disk_usage(project).free
     required_free = max(
         MIN_FREE_BYTES,
-        database.stat().st_size * 4
+        _database_footprint(database) * 4
         + attachments["total_bytes"] * 2
         + release["total_bytes"] * 3,
     )
@@ -585,14 +754,17 @@ def migrate_production(target_root, database, manifest_path, project_root):
     if manifest.get("before_commit") != BASELINE_COMMIT or manifest.get("target_commit") != TARGET_COMMIT:
         raise RuntimeError("deployment manifest does not match the reviewed V98->V100 transition")
     project = Path(project_root).resolve(strict=True)
+    migration_root = Path(target_root).resolve(strict=True)
+    if migration_root != project:
+        raise RuntimeError("migration target root must be the verified production target checkout")
     if _git(project, "rev-parse", "HEAD") != TARGET_COMMIT:
-        raise RuntimeError("production checkout must be switched to the target before migration")
+        raise RuntimeError("migration target checkout does not match the reviewed target SHA")
     marker = project / ".deployed_commit"
     if marker.read_text(encoding="ascii").strip() != TARGET_COMMIT:
         raise RuntimeError("production marker must be switched to the target before migration")
     if deployment_manifest.sqlite_evidence(database)["user_version"] != SOURCE_SCHEMA:
         raise RuntimeError("production database is not at the reviewed V98 baseline")
-    _run_target_migrations(Path(target_root).resolve(strict=True), database)
+    _run_target_migrations(migration_root, database)
     return _schema_acceptance(database, TARGET_SCHEMA)
 
 

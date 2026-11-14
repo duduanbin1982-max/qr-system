@@ -41,15 +41,20 @@ fails closed unless:
    reviewed transition; no tracked production data is present in either tree.
 4. A read-only SQLite backup is made into a private temporary directory. The
    target worktree runs V99 then V100 against that replica only. The check
-   validates SQLite integrity and foreign keys, V100 tables/columns/indexes/
-   triggers, preservation of every pre-existing table's columns and row facts,
-   and an idempotent second migration pass.
+   validates SQLite integrity and foreign keys, all required V100 table columns
+   and their type/null/default/primary-key signatures, the reviewed index
+   ownership and column definitions, and SHA-256 fingerprints of required
+   triggers. It also verifies preservation of every pre-existing table's
+   columns and row facts and an idempotent second migration pass. The production
+   migration command requires the exact target checkout directory and SHA.
 5. The target frontend passes pinned toolchain, API, import, layer, and build
    checks in an isolated worktree using Node 24.22.0/npm 11.19.1.
 
 The preflight removes its temporary database replica, build output, and target
 worktree. It does not acquire a production write fence, stop/restart the
 service, modify the production database, switch the checkout, or publish files.
+Capacity estimation includes the SQLite WAL file when present, in addition to
+the main database, managed attachments, and release inventory.
 
 ## Authorized execute mode
 
