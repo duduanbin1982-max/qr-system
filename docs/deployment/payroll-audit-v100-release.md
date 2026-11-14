@@ -44,7 +44,7 @@ fails closed unless:
    validates SQLite integrity and foreign keys, all required V100 table columns
    and their type/null/default/primary-key signatures, the reviewed index
    ownership and column definitions, and SHA-256 fingerprints of required
-   triggers. It also verifies preservation of every pre-existing table's
+   index SQL and triggers. It also verifies preservation of every pre-existing table's
    columns and row facts and an idempotent second migration pass. The production
    migration command requires the exact target checkout directory and SHA.
 5. The target frontend passes pinned toolchain, API, import, layer, and build

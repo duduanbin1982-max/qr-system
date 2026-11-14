@@ -125,6 +125,7 @@ def test_generic_static_gate_still_rejects_migrations_and_tests():
         ("column", "columns"),
         ("column-definition", "invalid_column_definitions"),
         ("index", "invalid_indexes"),
+        ("index-definition", "invalid_index_definitions"),
         ("trigger", "invalid_triggers"),
     ],
 )
@@ -150,6 +151,13 @@ def test_schema_acceptance_rejects_wrong_v100_columns_indexes_and_triggers(
             db.execute(
                 "CREATE INDEX idx_payroll_audit_findings_current "
                 "ON payroll_audit_findings(subject_id)"
+            )
+        elif corruption == "index-definition":
+            db.execute("DROP INDEX idx_payroll_adjustment_idempotency")
+            db.execute(
+                "CREATE UNIQUE INDEX idx_payroll_adjustment_idempotency "
+                "ON payroll_adjustments(idempotency_key) "
+                "WHERE idempotency_key = ''"
             )
         else:
             db.execute("DROP TRIGGER protect_closed_payroll_settlement")

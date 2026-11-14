@@ -141,6 +141,8 @@ CONTROL_TRANSITIONS = {
     ),
 }
 REQUIRED_TABLES = {
+    "payroll_adjustments",
+    "payroll_batches",
     "payroll_settlements",
     "payroll_export_batches",
     "payroll_export_items",
@@ -270,6 +272,11 @@ REQUIRED_INDEX_DEFINITIONS = {
     "idx_payroll_audit_findings_subject": (
         "payroll_audit_findings", ("subject_type", "subject_id", "finding_type"), False, False,
     ),
+}
+REQUIRED_INDEX_SQL_SHA256 = {
+    "idx_payroll_adjustment_idempotency": "3cfd4e7c8ffa8cbd6e51d0e232ebf94b165d916b51d4561f92b890ecfde0d9ec",
+    "idx_payroll_audit_findings_current": "9fc0ad22b827ae3d461f127a66b79b4a77ca50541548d53aff851d2accaabbaa",
+    "idx_payroll_audit_findings_subject": "c65d09e759eae87cf58a6308f20b8076a8a5ed31a7cf8b0bc79372a41288da02",
 }
 REQUIRED_COLUMN_SIGNATURE_SHA256 = {
     "payroll_audit_findings": "cc35c149dd7f085d35d98012c3d2a26e78ba4b9884f226accc3bf4ea9e7bb8b8",
@@ -479,6 +486,11 @@ def _schema_acceptance(database, expected_version):
         for name, expected in REQUIRED_INDEX_DEFINITIONS.items()
         if index_definitions.get(name) != expected
     }
+    invalid_index_definitions = {
+        name: hashlib.sha256((object_sql.get(("index", name)) or "").encode("utf-8")).hexdigest()
+        for name, digest in REQUIRED_INDEX_SQL_SHA256.items()
+        if hashlib.sha256((object_sql.get(("index", name)) or "").encode("utf-8")).hexdigest() != digest
+    }
     invalid_triggers = {
         name: hashlib.sha256((object_sql.get(("trigger", name)) or "").encode("utf-8")).hexdigest()
         for name, digest in REQUIRED_TRIGGER_SHA256.items()
@@ -491,6 +503,7 @@ def _schema_acceptance(database, expected_version):
         or missing_columns
         or invalid_column_definitions
         or invalid_indexes
+        or invalid_index_definitions
         or invalid_triggers
     ):
         raise RuntimeError(
@@ -498,7 +511,9 @@ def _schema_acceptance(database, expected_version):
             f"tables={missing_tables} triggers={missing_triggers} "
             f"indexes={missing_indexes} columns={missing_columns}; "
             f"invalid_column_definitions={sorted(invalid_column_definitions)} "
-            f"invalid_indexes={invalid_indexes} invalid_triggers={sorted(invalid_triggers)}"
+            f"invalid_indexes={invalid_indexes} "
+            f"invalid_index_definitions={sorted(invalid_index_definitions)} "
+            f"invalid_triggers={sorted(invalid_triggers)}"
         )
     return {
         **evidence,
@@ -506,6 +521,7 @@ def _schema_acceptance(database, expected_version):
         "required_triggers": sorted(REQUIRED_TRIGGERS),
         "required_indexes": sorted(REQUIRED_INDEXES),
         "verified_trigger_count": len(REQUIRED_TRIGGER_SHA256),
+        "verified_index_definition_count": len(REQUIRED_INDEX_SQL_SHA256),
         "verified_column_definition_count": len(REQUIRED_COLUMN_SIGNATURE_SHA256),
         "verified_index_definitions": sorted(REQUIRED_INDEX_DEFINITIONS),
         "required_columns": {
