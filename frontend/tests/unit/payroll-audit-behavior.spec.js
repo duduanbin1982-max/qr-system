@@ -7,12 +7,14 @@ import PriceVersionEditor from '@/components/wage/PriceVersionEditor.vue'
 
 const mocks = vi.hoisted(() => ({
   permissions: [],
+  auth: { user: { id: 17 } },
   wages: {},
   router: { params: {} },
   toast: vi.fn(),
 }))
 vi.mock('@/lib/api.js', () => ({ api: { domains: { wages: mocks.wages } } }))
 vi.mock('@/lib/auth.js', () => ({
+  auth: mocks.auth,
   can: permission => hasPermission({ permissions: mocks.permissions }, permission),
 }))
 vi.mock('@/lib/store.js', () => ({ showToast: mocks.toast }))
@@ -39,7 +41,9 @@ function batch(overrides = {}) {
 
 beforeEach(() => {
   localStorage.clear()
+  sessionStorage.clear()
   mocks.permissions = ['wages:view_all']
+  mocks.auth.user = { id: 17 }
   mocks.router.params = {}
   mocks.toast.mockReset()
   const responses = {
@@ -335,6 +339,9 @@ describe('payroll audit findings', () => {
           id: 41, payroll_month: '2026-10', batch_version: 2, calculation_version: 3,
           finding_type: 'duplicate_work_candidate', severity: 'review', status: 'open',
           subject_type: 'work_record', subject_id: 501, rule_version: 'payroll-audit-v2',
+          allowed_resolution_codes: [{
+            code: 'confirmed_distinct_work', label: '确认是不同作业',
+          }],
           snapshot_json: JSON.stringify({
             summary: '员工、订单、工序、类型、数量和实际时间完全相同',
             work_record: { employee_name: '张三', order_no: 'ORD-1', process_name: '组装' },
@@ -360,6 +367,7 @@ describe('payroll audit findings', () => {
     expect(wrapper.text()).toContain('工资异常中心')
     expect(wrapper.text()).toContain('疑似重复报工')
     expect(wrapper.text()).toContain('张三 · ORD-1 · 组装 · 报工 #501')
+    expect(wrapper.text()).toContain('确认是不同作业')
     expect(wrapper.text()).toContain('修正来源记录后重算')
     expect(button(wrapper, '记录复核')).toBeDefined()
 
@@ -370,7 +378,49 @@ describe('payroll audit findings', () => {
     expect(mocks.wages.resolvePayrollAuditFinding).toHaveBeenCalledWith(41, {
       resolution_code: 'confirmed_distinct_work',
       resolution_reason: '已核对两条为不同的实际作业',
+      idempotency_key: expect.stringMatching(/^payroll-audit-ui:resolve:/),
     })
+  })
+
+  it('reuses the audit resolution idempotency key after an uncertain retry', async () => {
+    mocks.permissions = ['wages:view_all', 'wages:approve']
+    localStorage.setItem('wageActiveTab', 'exceptions')
+    mocks.wages.listPayrollAuditFindings.mockResolvedValue({
+      audit_findings: [{
+        id: 61, payroll_month: '2026-10', batch_version: 2,
+        calculation_version: 3, finding_type: 'high_payroll_deviation',
+        severity: 'review', status: 'open', subject_type: 'employee',
+        subject_id: 5, rule_version: 'payroll-audit-v2',
+        allowed_resolution_codes: [{
+          code: 'confirmed_variance', label: '确认偏差合理',
+        }],
+        snapshot_json: JSON.stringify({
+          summary: '工资偏差达到复核阈值', employee_name: '王五',
+        }),
+      }],
+    })
+    mocks.wages.resolvePayrollAuditFinding
+      .mockRejectedValueOnce(new Error('响应中断'))
+      .mockResolvedValueOnce({ status: 'resolved', replayed: true })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = render(WageList)
+    await flushPromises()
+
+    const reason = wrapper.find('[aria-label="复核原因 61"]')
+    await reason.setValue('  已核对   历史差异依据  ')
+    await button(wrapper, '记录复核').trigger('click')
+    await flushPromises()
+    await reason.setValue('已核对 历史差异依据')
+    await button(wrapper, '记录复核').trigger('click')
+    await flushPromises()
+
+    const first = mocks.wages.resolvePayrollAuditFinding.mock.calls[0][1]
+    const retry = mocks.wages.resolvePayrollAuditFinding.mock.calls[1][1]
+    expect(retry.resolution_reason).toBe('已核对 历史差异依据')
+    expect(retry.idempotency_key).toBe(first.idempotency_key)
+    expect(sessionStorage.getItem(
+      'payroll-audit:pending-command:17:resolve'
+    )).toBeNull()
   })
 
   it('does not expose audit resolution actions to read-only payroll viewers', async () => {

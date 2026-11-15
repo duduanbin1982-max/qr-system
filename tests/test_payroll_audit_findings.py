@@ -20,6 +20,7 @@ from modules.services.payroll_service import (
 )
 import modules.services.payroll_service as payroll_service
 from modules.domain.payroll_audit_rules import PAYROLL_AUDIT_RULE_VERSION
+from modules.domain.payroll_policy import PayrollConflictError
 from modules.repositories.payroll_repository import PayrollRepository
 from modules.services.price_version_service import PriceVersionService
 
@@ -289,6 +290,14 @@ def test_duplicate_candidate_requires_approval_role_and_reason_before_submit(cli
         findings = _finding_by_type(db, batch["id"], "duplicate_work_candidate")
         assert [item["subject_id"] for item in findings] == sorted(record_ids)
         assert all(item["severity"] == "review" for item in findings)
+        listed = PayrollWorkflowService.list_audit_findings(
+            batch_id=batch["id"],
+            finding_type="duplicate_work_candidate",
+        )["audit_findings"]
+        assert listed[0]["allowed_resolution_codes"] == [{
+            "code": "confirmed_distinct_work",
+            "label": "确认是不同作业",
+        }]
         with pytest.raises(ValueError, match="未处理工资审计异常"):
             PayrollWorkflowService.submit(batch["id"], preparer, batch["row_version"])
         with pytest.raises(ValueError, match="复核人必须为不同用户"):
@@ -296,6 +305,7 @@ def test_duplicate_candidate_requires_approval_role_and_reason_before_submit(cli
                 findings[0]["id"], preparer, {
                     "resolution_code": "confirmed_distinct_work",
                     "resolution_reason": "尝试由制单人自我复核",
+                    "idempotency_key": "self-review-rejected",
                 }
             )
 
@@ -304,6 +314,7 @@ def test_duplicate_candidate_requires_approval_role_and_reason_before_submit(cli
                 finding["id"], approver, {
                     "resolution_code": "confirmed_distinct_work",
                     "resolution_reason": "复核报工凭证后确认为两次独立作业",
+                    "idempotency_key": f"duplicate-review-{finding['id']}",
                 }
             )
         with pytest.raises(sqlite3.IntegrityError, match="evidence is immutable"):
@@ -318,6 +329,48 @@ def test_duplicate_candidate_requires_approval_role_and_reason_before_submit(cli
             batch["id"], preparer, batch["row_version"]
         )
         assert submitted["status"] == "review_pending"
+
+
+def test_audit_resolution_replays_same_command_and_rejects_key_reuse(client):
+    with client.application.app_context():
+        db = get_db()
+        preparer, approver = _actors(db)
+        _seed_batch_inputs(db, statuses=("approved", "approved"))
+        batch = PayrollWorkflowService.create_batch(
+            "2026-07", preparer, "b2-audit-idempotency"
+        )
+        finding = _finding_by_type(
+            db, batch["id"], "duplicate_work_candidate"
+        )[0]
+        payload = {
+            "resolution_code": "confirmed_distinct_work",
+            "resolution_reason": "  现场凭证确认   是两次独立作业  ",
+            "idempotency_key": "audit-resolution-retry",
+        }
+
+        first = PayrollAuditService.resolve(finding["id"], approver, payload)
+        replay = PayrollAuditService.resolve(
+            finding["id"],
+            approver,
+            {**payload, "resolution_reason": "现场凭证确认 是两次独立作业"},
+        )
+
+        assert first["replayed"] is False
+        assert replay == {**first, "replayed": True}
+        event = db.execute(
+            "SELECT payload_json FROM payroll_events WHERE idempotency_key=?",
+            ("payroll-audit-resolve:audit-resolution-retry",),
+        ).fetchone()
+        event_payload = json.loads(event["payload_json"])
+        assert event_payload["request_digest"]
+        assert event_payload["response"]["id"] == finding["id"]
+
+        with pytest.raises(PayrollConflictError, match="不同的工资审计复核请求"):
+            PayrollAuditService.resolve(
+                finding["id"],
+                approver,
+                {**payload, "resolution_reason": "改用另一份复核依据"},
+            )
 
 
 def test_high_deviation_compares_three_latest_active_confirmed_periods(client):
@@ -505,7 +558,10 @@ def test_approval_role_can_resolve_review_finding_through_audited_api(client, mo
             "resolution_code": "confirmed_distinct_work",
             "resolution_reason": "现场凭证确认是两次独立作业",
         },
-        headers={"Authorization": "Bearer payroll-audit-approver"},
+        headers={
+            "Authorization": "Bearer payroll-audit-approver",
+            "Idempotency-Key": "audit-api-resolution",
+        },
     )
 
     assert response.status_code == 200, response.get_json()
@@ -517,3 +573,25 @@ def test_approval_role_can_resolve_review_finding_through_audited_api(client, mo
     assert len(result) == 1
     assert result[0]["resolved_by_name"] == approver["name"]
     assert result[0]["resolution_reason"] == "现场凭证确认是两次独立作业"
+
+
+def test_audit_finding_resolution_requires_idempotency_key(client, monkeypatch):
+    actor = {
+        "id": 23,
+        "name": "工资审批用户",
+        "username": "payroll-audit-approver",
+        "_permissions": ["wages:approve"],
+    }
+    monkeypatch.setattr(
+        AuthSessionService, "authenticate", lambda _token: (dict(actor), None)
+    )
+    response = client.post(
+        "/api/payroll/audit-findings/1/resolve",
+        json={
+            "resolution_code": "confirmed_variance",
+            "resolution_reason": "已复核偏差依据",
+        },
+        headers={"Authorization": "Bearer payroll-audit-approver"},
+    )
+    assert response.status_code == 400
+    assert "幂等键" in response.get_json()["error"]

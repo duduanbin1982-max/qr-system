@@ -58,7 +58,7 @@ def _normalized_reason(value):
     return " ".join(str(value or "").split())
 
 
-def _adjustment_idempotency_key(value):
+def _command_idempotency_key(value):
     key = str(value or "").strip()
     if not key or len(key) > 128:
         raise ValueError("必须提供 1 到 128 个字符的幂等键")
@@ -82,10 +82,27 @@ def _is_pre_audit_locked_batch(batch):
 
 
 class PayrollAuditService:
-    RESOLUTION_CODES = {
-        "duplicate_work_candidate": {"confirmed_distinct_work"},
-        "high_payroll_deviation": {"confirmed_variance"},
+    RESOLUTION_OPTIONS = {
+        "duplicate_work_candidate": (
+            {"code": "confirmed_distinct_work", "label": "确认是不同作业"},
+        ),
+        "high_payroll_deviation": (
+            {"code": "confirmed_variance", "label": "确认偏差合理"},
+        ),
     }
+    RESOLUTION_CODES = {
+        finding_type: frozenset(option["code"] for option in options)
+        for finding_type, options in RESOLUTION_OPTIONS.items()
+    }
+
+    @staticmethod
+    def resolution_options(finding_type):
+        return [
+            dict(option)
+            for option in PayrollAuditService.RESOLUTION_OPTIONS.get(
+                finding_type, ()
+            )
+        ]
 
     @staticmethod
     def evaluate(batch, db):
@@ -150,11 +167,32 @@ class PayrollAuditService:
         actor_id, actor_name = _actor(actor_user)
         if actor_id is None:
             raise ValueError("当前用户无审批身份")
+        idempotency_key = _command_idempotency_key(data.get("idempotency_key"))
         resolution_code = str(data.get("resolution_code") or "").strip()
-        resolution_reason = str(data.get("resolution_reason") or "").strip()
+        resolution_reason = _normalized_reason(data.get("resolution_reason"))
         if len(resolution_reason) < 4 or len(resolution_reason) > 1000:
             raise ValueError("复核原因必须为 4 到 1000 个字符")
+        request_digest = _request_digest({
+            "operation": "resolve_audit_finding",
+            "actor_id": actor_id,
+            "finding_id": int(finding_id),
+            "resolution_code": resolution_code,
+            "resolution_reason": resolution_reason,
+        })
+        event_key = f"payroll-audit-resolve:{idempotency_key}"
         with BaseService.transaction() as db:
+            existing_event = PayrollRepository.event_by_idempotency_key(
+                event_key, db=db
+            )
+            if existing_event:
+                payload = json.loads(existing_event.get("payload_json") or "{}")
+                if payload.get("request_digest") != request_digest:
+                    raise PayrollConflictError(
+                        "幂等键已用于不同的工资审计复核请求"
+                    )
+                response = dict(payload.get("response") or {})
+                response["replayed"] = True
+                return response
             finding = PayrollRepository.get_audit_finding(finding_id, db)
             if not finding:
                 raise ValueError("工资审计异常不存在")
@@ -182,6 +220,14 @@ class PayrollAuditService:
                     "resolved_by": actor_id,
                 }, db,
             )
+            response = {
+                "ok": True,
+                "id": finding_id,
+                "status": "resolved",
+                "resolution_code": resolution_code,
+                "resolution_reason": resolution_reason,
+                "replayed": False,
+            }
             PayrollRepository.insert_event({
                 "batch_id": batch["id"],
                 "event_type": "audit_finding_resolved",
@@ -195,15 +241,12 @@ class PayrollAuditService:
                     "subject_id": finding["subject_id"],
                     "calculation_version": finding["calculation_version"],
                     "resolution_code": resolution_code,
+                    "request_digest": request_digest,
+                    "response": response,
                 },
+                "idempotency_key": event_key,
             }, db)
-            return {
-                "ok": True,
-                "id": finding_id,
-                "status": "resolved",
-                "resolution_code": resolution_code,
-                "resolution_reason": resolution_reason,
-            }
+            return response
 
 
 class PayrollCalculationService:
@@ -484,154 +527,226 @@ class PayrollCalculationService:
         }, None, None
 
     @staticmethod
-    def populate(batch, actor, db):
-        PayrollRepository.delete_draft_calculation(batch["id"], db)
-        resolved, adjustments, digest = PayrollCalculationService.collect_inputs(batch, db)
-        employees = {}
+    def _employee_bucket(batch, employees, row, employee_id=None):
+        employee_id = row.get("user_id") if employee_id is None else employee_id
+        key = employee_id
+        if key is None:
+            key = (
+                f"snapshot:{row.get('employee_no', '')}:"
+                f"{row.get('employee_name', '')}"
+            )
+        if key not in employees:
+            employees[key] = {
+                "batch_id": batch["id"],
+                "employee_id": employee_id,
+                "employee_name_snapshot": row.get("employee_name") or "",
+                "employee_no_snapshot": row.get("employee_no") or "",
+                "position_name_snapshot": row.get("position_name") or "",
+                "normal_quantity": 0,
+                "rework_quantity": 0,
+                "normal_wage_cents": 0,
+                "rework_wage_cents": 0,
+                "bonus_cents": 0,
+                "allowance_cents": 0,
+                "deduction_cents": 0,
+                "payable_wage_cents": 0,
+                "exception_count": 0,
+            }
+        return employees[key]
+
+    @staticmethod
+    def _aggregate_work_records(batch, resolved, employees, db):
         details = []
         priced_count = 0
         failed_work_ids = []
-
-        def employee_bucket(row, employee_id=None):
-            employee_id = row.get("user_id") if employee_id is None else employee_id
-            key = employee_id if employee_id is not None else f"snapshot:{row.get('employee_no','')}:{row.get('employee_name','')}"
-            if key not in employees:
-                employees[key] = {
-                    "batch_id": batch["id"], "employee_id": employee_id,
-                    "employee_name_snapshot": row.get("employee_name") or "",
-                    "employee_no_snapshot": row.get("employee_no") or "",
-                    "position_name_snapshot": row.get("position_name") or "",
-                    "normal_quantity": 0, "rework_quantity": 0,
-                    "normal_wage_cents": 0, "rework_wage_cents": 0,
-                    "bonus_cents": 0, "allowance_cents": 0, "deduction_cents": 0,
-                    "payable_wage_cents": 0, "exception_count": 0,
-                }
-            return employees[key]
-
         for item in resolved:
-            row, price, exception_type = item["row"], item["price"], item["error"]
-            bucket = employee_bucket(row)
-            if exception_type:
-                PayrollCalculationService._exception(batch, row, exception_type, db)
-                bucket["exception_count"] += 1
-                failed_work_ids.append(row["work_record_id"])
-                continue
-            try:
-                if row["quantity"] is None or int(row["quantity"]) <= 0:
-                    raise ValueError("quantity")
-                amount = work_amount_cents(
-                    row["quantity"], price["normal_unit_price_micros"],
-                    price["rework_rate_basis_points"] if row["work_type"] == "rework" else None,
-                )
-            except (TypeError, ValueError, OverflowError):
-                PayrollCalculationService._exception(batch, row, "invalid_amount", db)
-                bucket["exception_count"] += 1
-                failed_work_ids.append(row["work_record_id"])
-                continue
-            priced_count += 1
-            if row["work_type"] == "rework":
-                bucket["rework_quantity"] += int(row["quantity"])
-                bucket["rework_wage_cents"] += amount
-                source_type = "rework_work"
-            else:
-                bucket["normal_quantity"] += int(row["quantity"])
-                bucket["normal_wage_cents"] += amount
-                source_type = "normal_work"
-            details.append({
-                "bucket": bucket,
-                "source_type": source_type,
-                "source_id": row["work_record_id"],
-                "work_record_id": row["work_record_id"],
-                "work_recorded_at": row["work_recorded_at"],
-                "order_id": row.get("order_id"), "order_no_snapshot": row.get("order_no") or "",
-                "product_code_snapshot": row.get("product_code") or "",
-                "product_name_snapshot": row.get("product_name") or "",
-                "route_id": row.get("route_id"),
-                "route_version_id": row.get("route_version_id"),
-                "route_name_snapshot": row.get("route_name") or "",
-                "process_id": row.get("process_id"),
-                "process_version_id": row.get("process_version_id"),
-                "process_name_snapshot": row.get("process_name") or "",
-                "quantity": int(row["quantity"]), "price_version_id": price.get("price_version_id"),
-                "unit_price_micros": price["normal_unit_price_micros"],
-                "rework_rate_basis_points": price.get("rework_rate_basis_points") or 0,
-                "amount_cents": amount, "resolution_method": price["resolution_method"],
-                "resolution_reason": price["resolution_reason"], "resolved_by": price.get("resolved_by"),
-                "resolved_by_name": price.get("resolved_by_name") or "", "resolved_at": price.get("resolved_at") or "",
-                "source_snapshot_json": _fixed_snapshot(_snapshot(row)),
-            })
+            detail, failed_work_id = PayrollCalculationService._apply_work_record(
+                batch, item, employees, db
+            )
+            if failed_work_id is not None:
+                failed_work_ids.append(failed_work_id)
+            if detail is not None:
+                details.append(detail)
+                priced_count += 1
+        return details, priced_count, failed_work_ids
 
+    @staticmethod
+    def _apply_work_record(batch, item, employees, db):
+        row, price, exception_type = item["row"], item["price"], item["error"]
+        bucket = PayrollCalculationService._employee_bucket(
+            batch, employees, row
+        )
+        if exception_type:
+            PayrollCalculationService._exception(batch, row, exception_type, db)
+            bucket["exception_count"] += 1
+            return None, row["work_record_id"]
+        try:
+            if row["quantity"] is None or int(row["quantity"]) <= 0:
+                raise ValueError("quantity")
+            amount = work_amount_cents(
+                row["quantity"],
+                price["normal_unit_price_micros"],
+                price["rework_rate_basis_points"]
+                if row["work_type"] == "rework" else None,
+            )
+        except (TypeError, ValueError, OverflowError):
+            PayrollCalculationService._exception(batch, row, "invalid_amount", db)
+            bucket["exception_count"] += 1
+            return None, row["work_record_id"]
+        source_type = PayrollCalculationService._add_work_amount(
+            bucket, row, amount
+        )
+        return PayrollCalculationService._work_detail(
+            item, bucket, amount, source_type
+        ), None
+
+    @staticmethod
+    def _add_work_amount(bucket, row, amount):
+        if row["work_type"] == "rework":
+            bucket["rework_quantity"] += int(row["quantity"])
+            bucket["rework_wage_cents"] += amount
+            return "rework_work"
+        bucket["normal_quantity"] += int(row["quantity"])
+        bucket["normal_wage_cents"] += amount
+        return "normal_work"
+
+    @staticmethod
+    def _work_detail(item, bucket, amount, source_type):
+        row, price = item["row"], item["price"]
+        return {
+            "bucket": bucket, "source_type": source_type,
+            "source_id": row["work_record_id"],
+            "work_record_id": row["work_record_id"],
+            "work_recorded_at": row["work_recorded_at"],
+            "order_id": row.get("order_id"),
+            "order_no_snapshot": row.get("order_no") or "",
+            "product_code_snapshot": row.get("product_code") or "",
+            "product_name_snapshot": row.get("product_name") or "",
+            "route_id": row.get("route_id"),
+            "route_version_id": row.get("route_version_id"),
+            "route_name_snapshot": row.get("route_name") or "",
+            "process_id": row.get("process_id"),
+            "process_version_id": row.get("process_version_id"),
+            "process_name_snapshot": row.get("process_name") or "",
+            "quantity": int(row["quantity"]),
+            "price_version_id": price.get("price_version_id"),
+            "unit_price_micros": price["normal_unit_price_micros"],
+            "rework_rate_basis_points": (
+                price.get("rework_rate_basis_points") or 0
+            ),
+            "amount_cents": amount,
+            "resolution_method": price["resolution_method"],
+            "resolution_reason": price["resolution_reason"],
+            "resolved_by": price.get("resolved_by"),
+            "resolved_by_name": price.get("resolved_by_name") or "",
+            "resolved_at": price.get("resolved_at") or "",
+            "source_snapshot_json": _fixed_snapshot(_snapshot(row)),
+        }
+
+    @staticmethod
+    def _apply_adjustments(batch, adjustments, calculation):
         for adjustment in adjustments:
-            key = adjustment.get("employee_id")
-            bucket = employees.get(key)
-            if bucket is None:
-                bucket = employee_bucket({
-                    "user_id": key,
-                    "employee_name": adjustment.get("employee_name_snapshot") or "",
-                    "employee_no": adjustment.get("employee_no_snapshot") or "",
-                    "position_name": "",
-                }, key)
-            sign = -1 if adjustment.get("reversal_of_id") else 1
-            amount = int(adjustment["amount_cents"]) * sign
-            if adjustment["adjustment_type"] == "bonus":
-                bucket["bonus_cents"] += amount
-                source_type = "bonus"
-                detail_amount = amount
-            elif adjustment["adjustment_type"] == "allowance":
-                bucket["allowance_cents"] += amount
-                source_type = "allowance"
-                detail_amount = amount
-            else:
-                bucket["deduction_cents"] += amount
-                source_type = "deduction"
-                detail_amount = -amount
-            details.append({
-                "bucket": bucket, "source_type": source_type, "source_id": adjustment["id"],
-                "quantity": 0, "amount_cents": detail_amount,
-                "resolution_method": "adjustment", "resolution_reason": adjustment["reason"],
-                "resolved_by": adjustment.get("created_by"), "resolved_by_name": adjustment.get("created_by_name") or "",
-                "resolved_at": adjustment.get("created_at") or "",
-                "source_snapshot_json": _fixed_snapshot(adjustment),
-                "work_record_id": None, "work_recorded_at": adjustment.get("created_at") or "",
-                "order_id": None, "order_no_snapshot": "", "product_code_snapshot": "",
-                "product_name_snapshot": "", "route_id": None,
-                "route_version_id": None, "route_name_snapshot": "",
-                "process_id": None, "process_version_id": None,
-                "process_name_snapshot": "", "price_version_id": None,
-                "unit_price_micros": 0, "rework_rate_basis_points": 0,
-            })
+            calculation["details"].append(
+                PayrollCalculationService._apply_adjustment(
+                    batch, adjustment, calculation["employees"]
+                )
+            )
 
-        for bucket in employees.values():
+    @staticmethod
+    def _apply_adjustment(batch, adjustment, employees):
+        key = adjustment.get("employee_id")
+        bucket = PayrollCalculationService._employee_bucket(
+            batch,
+            employees,
+            {
+                "user_id": key,
+                "employee_name": adjustment.get("employee_name_snapshot") or "",
+                "employee_no": adjustment.get("employee_no_snapshot") or "",
+                "position_name": "",
+            },
+            key,
+        )
+        sign = -1 if adjustment.get("reversal_of_id") else 1
+        amount = int(adjustment["amount_cents"]) * sign
+        if adjustment["adjustment_type"] == "bonus":
+            bucket["bonus_cents"] += amount
+            source_type, detail_amount = "bonus", amount
+        elif adjustment["adjustment_type"] == "allowance":
+            bucket["allowance_cents"] += amount
+            source_type, detail_amount = "allowance", amount
+        else:
+            bucket["deduction_cents"] += amount
+            source_type, detail_amount = "deduction", -amount
+        return PayrollCalculationService._adjustment_detail(
+            adjustment, bucket, source_type, detail_amount
+        )
+
+    @staticmethod
+    def _adjustment_detail(adjustment, bucket, source_type, detail_amount):
+        return {
+            "bucket": bucket, "source_type": source_type,
+            "source_id": adjustment["id"], "quantity": 0,
+            "amount_cents": detail_amount, "resolution_method": "adjustment",
+            "resolution_reason": adjustment["reason"],
+            "resolved_by": adjustment.get("created_by"),
+            "resolved_by_name": adjustment.get("created_by_name") or "",
+            "resolved_at": adjustment.get("created_at") or "",
+            "source_snapshot_json": _fixed_snapshot(adjustment),
+            "work_record_id": None,
+            "work_recorded_at": adjustment.get("created_at") or "",
+            "order_id": None, "order_no_snapshot": "",
+            "product_code_snapshot": "", "product_name_snapshot": "",
+            "route_id": None, "route_version_id": None,
+            "route_name_snapshot": "", "process_id": None,
+            "process_version_id": None, "process_name_snapshot": "",
+            "price_version_id": None, "unit_price_micros": 0,
+            "rework_rate_basis_points": 0,
+        }
+
+    @staticmethod
+    def _persist_calculation_lines(batch, calculation, db):
+        for bucket in calculation["employees"].values():
             bucket["payable_wage_cents"] = (
                 bucket["normal_wage_cents"] + bucket["rework_wage_cents"] +
                 bucket["bonus_cents"] + bucket["allowance_cents"] - bucket["deduction_cents"]
             )
             bucket["line_id"] = PayrollRepository.insert_employee_line(bucket, db)
-        for detail in details:
+        for detail in calculation["details"]:
             detail["batch_id"] = batch["id"]
             detail["employee_line_id"] = detail["bucket"]["line_id"]
             detail.pop("bucket", None)
             PayrollRepository.insert_detail_line(detail, db)
-        exception_count = len(failed_work_ids)
+
+    @staticmethod
+    def _calculation_totals(batch, calculation):
+        employees = calculation["employees"]
+        exception_count = len(calculation["failed_work_ids"])
         status = "exceptions_pending" if exception_count else "draft"
-        totals = {
-            "status": status, "input_digest": digest, "source_cutoff_at": batch["source_cutoff_at"],
+        return {
+            "status": status, "input_digest": calculation["input_digest"],
+            "source_cutoff_at": batch["source_cutoff_at"],
             "normal_wage_cents": sum(item["normal_wage_cents"] for item in employees.values()),
             "rework_wage_cents": sum(item["rework_wage_cents"] for item in employees.values()),
             "bonus_cents": sum(item["bonus_cents"] for item in employees.values()),
             "allowance_cents": sum(item["allowance_cents"] for item in employees.values()),
             "deduction_cents": sum(item["deduction_cents"] for item in employees.values()),
             "payable_wage_cents": sum(item["payable_wage_cents"] for item in employees.values()),
-            "source_record_count": len(resolved), "priced_record_count": priced_count, "exception_count": exception_count,
+            "source_record_count": calculation["source_record_count"],
+            "priced_record_count": calculation["priced_count"],
+            "exception_count": exception_count,
             "audit_rule_version": PAYROLL_AUDIT_RULE_VERSION,
             "submitted_at": "",
         }
-        PayrollRepository.update_batch_calculation(batch["id"], batch["row_version"], totals, db)
-        calculated_batch = PayrollRepository.get_batch(batch["id"], db)
-        audit_findings = PayrollAuditService.evaluate(calculated_batch, db)
+
+    @staticmethod
+    def _calculation_result(batch, totals, calculation, db):
+        calculated_batch = calculation["calculated_batch"]
+        audit_findings = calculation["audit_findings"]
         return {
-            "batch_id": batch["id"], **totals, "employee_count": len(employees),
-            "detail_count": len(details), "unsettled_work_record_ids": failed_work_ids,
+            "batch_id": batch["id"], **totals,
+            "employee_count": len(calculation["employees"]),
+            "detail_count": len(calculation["details"]),
+            "unsettled_work_record_ids": calculation["failed_work_ids"],
             "audit_rule_version": PAYROLL_AUDIT_RULE_VERSION,
             "audit_run_version": calculated_batch["audit_run_version"],
             "audit_finding_count": len(audit_findings),
@@ -644,6 +759,44 @@ class PayrollCalculationService:
                 PayrollRepository.list_details(batch["id"], db=db),
             ),
         }
+
+    @staticmethod
+    def populate(batch, actor, db):
+        PayrollRepository.delete_draft_calculation(batch["id"], db)
+        resolved, adjustments, digest = PayrollCalculationService.collect_inputs(
+            batch, db
+        )
+        employees = {}
+        details, priced_count, failed_work_ids = (
+            PayrollCalculationService._aggregate_work_records(
+                batch, resolved, employees, db
+            )
+        )
+        calculation = {
+            "employees": employees,
+            "details": details,
+            "priced_count": priced_count,
+            "failed_work_ids": failed_work_ids,
+            "source_record_count": len(resolved),
+            "input_digest": digest,
+        }
+        PayrollCalculationService._apply_adjustments(
+            batch, adjustments, calculation
+        )
+        PayrollCalculationService._persist_calculation_lines(
+            batch, calculation, db
+        )
+        totals = PayrollCalculationService._calculation_totals(batch, calculation)
+        PayrollRepository.update_batch_calculation(batch["id"], batch["row_version"], totals, db)
+        calculation["calculated_batch"] = PayrollRepository.get_batch(
+            batch["id"], db
+        )
+        calculation["audit_findings"] = PayrollAuditService.evaluate(
+            calculation["calculated_batch"], db
+        )
+        return PayrollCalculationService._calculation_result(
+            batch, totals, calculation, db
+        )
 
 
 class PayrollWorkflowService:
@@ -942,7 +1095,7 @@ class PayrollWorkflowService:
     @staticmethod
     def create_adjustment(actor_user, data):
         actor_id, actor_name = _actor(actor_user)
-        idempotency_key = _adjustment_idempotency_key(data.get("idempotency_key"))
+        idempotency_key = _command_idempotency_key(data.get("idempotency_key"))
         month = validate_payroll_month(data.get("payroll_month"))
         adjustment_type = str(data.get("adjustment_type") or "").strip()
         if adjustment_type not in ("bonus", "allowance", "deduction"):
@@ -992,7 +1145,7 @@ class PayrollWorkflowService:
     @staticmethod
     def reverse_adjustment(adjustment_id, actor_user, reason, idempotency_key=None):
         actor_id, actor_name = _actor(actor_user)
-        idempotency_key = _adjustment_idempotency_key(idempotency_key)
+        idempotency_key = _command_idempotency_key(idempotency_key)
         reason = _normalized_reason(reason)
         if not reason:
             raise ValueError("冲销必须填写原因")
@@ -1190,14 +1343,27 @@ class PayrollWorkflowService:
         month="", batch_id=None, status="", severity="", finding_type="",
         include_history=False,
     ):
-        return {"audit_findings": PayrollRepository.list_audit_findings(
+        findings = PayrollRepository.list_audit_findings(
             month=month,
             batch_id=batch_id,
             status=status,
             severity=severity,
             finding_type=finding_type,
             current_only=not include_history,
-        )}
+        )
+        return {"audit_findings": [
+            {
+                **finding,
+                "allowed_resolution_codes": (
+                    PayrollAuditService.resolution_options(
+                        finding["finding_type"]
+                    )
+                    if finding.get("severity") == "review"
+                    else []
+                ),
+            }
+            for finding in findings
+        ]}
 
     @staticmethod
     def list_adjustments(month="", employee_id=None):
