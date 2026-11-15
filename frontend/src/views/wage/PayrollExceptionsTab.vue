@@ -50,6 +50,10 @@
               <td><span class="exception-status" :class="'status-'+finding.status">{{ findingStatusLabel(finding.status) }}</span></td>
               <td>
                 <div v-if="finding.status==='open' && finding.severity==='review' && canApprove" class="finding-review">
+                  <select v-model="auditResolutionCodes[finding.id]" class="form-input" :aria-label="'复核结论 '+finding.id">
+                    <option value="" disabled>选择复核结论</option>
+                    <option v-for="option in findingResolutionOptions(finding)" :key="option.code" :value="option.code">{{ option.label }}</option>
+                  </select>
                   <input v-model="auditResolutions[finding.id]" class="form-input" :aria-label="'复核原因 '+finding.id" placeholder="填写复核依据">
                   <button class="btn-primary btn-sm" :disabled="working" @click="resolveAuditFinding(finding)">记录复核</button>
                 </div>
@@ -111,6 +115,7 @@ const {
   auditStatus,
   includeAuditHistory,
   auditResolutions,
+  auditResolutionCodes,
   loading,
   working,
   editingId,
@@ -127,6 +132,7 @@ const {
   statusLabel,
   findingLabel,
   findingStatusLabel,
+  findingResolutionOptions,
   findingSnapshot,
   findingSubject,
   findingEvidence,
@@ -142,4 +148,5 @@ const {
 
 <style scoped>
 .exception-toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:12px}.exception-toolbar h3{margin:0;font-size:18px}.exception-toolbar p{margin:4px 0 0;color:var(--text-placeholder);font-size:12px}.exception-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.exception-actions .form-input{width:145px}.audit-history-toggle{display:flex;align-items:center;gap:6px;white-space:nowrap;color:var(--text-secondary);font-size:12px}.audit-findings-section{margin:0 0 16px}.audit-section-heading{display:flex;align-items:center;justify-content:space-between;margin:0 0 8px}.audit-section-heading h4{margin:0;font-size:15px}.audit-section-heading span{color:var(--text-placeholder);font-size:12px}.audit-findings-table-wrap{overflow-x:auto;border:1px solid var(--border-color);border-radius:6px}.audit-findings-table{width:100%;min-width:1050px}.audit-findings-table small{display:block;margin-top:3px;color:var(--text-placeholder)}.finding-basis{max-width:420px;white-space:normal}.finding-basis p{margin:0}.finding-basis details{margin-top:5px;color:var(--text-secondary);font-size:12px}.finding-basis summary{cursor:pointer;color:var(--primary)}.finding-basis ul{margin:5px 0 0;padding-left:18px}.finding-review{display:grid;grid-template-columns:minmax(140px,1fr) auto;gap:6px;min-width:250px}.severity-blocking,.blocking-guidance{color:var(--danger)!important}.severity-review{color:var(--warning)!important}.exception-table-wrap{padding:0;overflow-x:auto;border-radius:8px}.exception-table{width:100%;min-width:920px}.exception-table small{display:block;margin-top:2px;color:var(--text-placeholder)}.exception-empty{text-align:center;padding:32px;color:var(--text-placeholder)}.exception-status{display:inline-block;padding:2px 7px;border-radius:4px;background:var(--bg-secondary);font-size:12px}.status-proposed{color:var(--primary);background:var(--primary-light)}.status-approved,.status-resolved{color:var(--success);background:var(--success-light)}.status-rejected{color:var(--danger);background:var(--danger-light)}.proposal-row td{background:var(--bg-secondary)}.proposal-form{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}.proposal-form label{display:flex;flex-direction:column;gap:4px;color:var(--text-placeholder);font-size:12px}.proposal-form .form-input{width:150px}.proposal-form .reason{flex:1;min-width:220px}.proposal-form .reason .form-input{width:100%}@media(max-width:760px){.exception-toolbar{flex-direction:column}.exception-actions{width:100%;flex-wrap:wrap}.exception-actions .form-input{width:auto;min-width:130px}}
+.finding-review{grid-template-columns:minmax(140px,1fr) minmax(160px,1fr) auto;min-width:390px}
 </style>

@@ -1,15 +1,14 @@
 import { computed,onMounted,ref } from 'vue'
 import { api } from '@/lib/api.js'
 import { auth,can } from '@/lib/auth.js'
+import {
+  clearPendingCommand,
+  normalizeCommandReason,
+  pendingCommandKey,
+} from '@/composables/wage/payrollPendingCommands.js'
 import { showToast } from '@/lib/store.js'
 
 const PENDING_COMMAND_PREFIX='payroll-adjustments:pending-command:'
-const pendingCommandsByStorageKey=new Map()
-const memoryOnlyStorageKeys=new Set()
-
-function commandKey(action){return `payroll-adjustment-ui:${action}:${Date.now()}:${Math.random().toString(16).slice(2)}`}
-
-function normalizeReason(value){return String(value??'').trim().replace(/\s+/gu,' ')}
 
 function canonicalAmountCents(value){
   const text=String(value??'').trim()
@@ -29,58 +28,6 @@ function canonicalAmountCents(value){
   }
   if(cents<=0n||cents>9000000000000000n)throw new Error('金额必须大于 0 且不能超出范围')
   return cents.toString()
-}
-
-function inMemoryPendingCommands(storageKey){
-  if(!pendingCommandsByStorageKey.has(storageKey))pendingCommandsByStorageKey.set(storageKey,new Map())
-  return pendingCommandsByStorageKey.get(storageKey)
-}
-
-function readPendingCommands(storageKey){
-  const fallback=inMemoryPendingCommands(storageKey)
-  let serialized
-  try{serialized=sessionStorage.getItem(storageKey)}catch(_){memoryOnlyStorageKeys.add(storageKey);return fallback}
-  if(!serialized){
-    if(memoryOnlyStorageKeys.has(storageKey))return fallback
-    const empty=new Map()
-    pendingCommandsByStorageKey.set(storageKey,empty)
-    return empty
-  }
-  try{
-    const entries=JSON.parse(serialized)
-    const commands=new Map(Array.isArray(entries)?entries.filter(entry=>Array.isArray(entry)&&typeof entry[0]==='string'&&typeof entry[1]==='string'):[])
-    pendingCommandsByStorageKey.set(storageKey,commands)
-    memoryOnlyStorageKeys.delete(storageKey)
-    return commands
-  }catch(_){
-    const empty=new Map()
-    pendingCommandsByStorageKey.set(storageKey,empty)
-    memoryOnlyStorageKeys.delete(storageKey)
-    return empty
-  }
-}
-
-function persistPendingCommands(storageKey,commands){
-  try{
-    if(commands.size)sessionStorage.setItem(storageKey,JSON.stringify([...commands]))
-    else sessionStorage.removeItem(storageKey)
-    memoryOnlyStorageKeys.delete(storageKey)
-  }catch(_){memoryOnlyStorageKeys.add(storageKey)}
-}
-
-function pendingCommandKey(storageKey,action,signature){
-  const commands=readPendingCommands(storageKey)
-  if(commands.has(signature))return commands.get(signature)
-  const key=commandKey(action)
-  commands.set(signature,key)
-  persistPendingCommands(storageKey,commands)
-  return key
-}
-
-function clearPendingCommand(storageKey,signature){
-  const commands=readPendingCommands(storageKey)
-  if(!commands.delete(signature))return
-  persistPendingCommands(storageKey,commands)
 }
 
 export function usePayrollAdjustments() {
@@ -111,9 +58,9 @@ export function usePayrollAdjustments() {
 
   async function loadEmployees(){if(!canPrepare.value)return;try{const data=await api.domains.users.listUsers({limit:500});employees.value=(data.users||[]).filter(item=>item.status!=='disabled')}catch(error){showToast(error.message||'员工加载失败','error')}}
 
-  async function createAdjustment(){const reason=normalizeReason(form.value.reason);let amountCents;try{amountCents=canonicalAmountCents(form.value.amount)}catch(_){showToast('请完整填写员工、金额和原因','error');return}if(!form.value.employeeId||!reason){showToast('请完整填写员工、金额和原因','error');return}const payload={employee_id:Number(form.value.employeeId),payroll_month:month.value,adjustment_type:form.value.type,amount:form.value.amount,reason};const signature=JSON.stringify({employee_id:payload.employee_id,payroll_month:payload.payroll_month,adjustment_type:payload.adjustment_type,amount_cents:amountCents,reason});payload.idempotency_key=pendingCommandKey(createStorageKey,'create',signature);working.value=true;try{await api.domains.wages.createPayrollAdjustment(payload);clearPendingCommand(createStorageKey,signature);showToast('调整项已追加');form.value={employeeId:'',type:'bonus',amount:'',reason:''};showForm.value=false;await load()}catch(error){showToast(error.message||'保存失败','error')}finally{working.value=false}}
+  async function createAdjustment(){const reason=normalizeCommandReason(form.value.reason);let amountCents;try{amountCents=canonicalAmountCents(form.value.amount)}catch(_){showToast('请完整填写员工、金额和原因','error');return}if(!form.value.employeeId||!reason){showToast('请完整填写员工、金额和原因','error');return}const payload={employee_id:Number(form.value.employeeId),payroll_month:month.value,adjustment_type:form.value.type,amount:form.value.amount,reason};const signature=JSON.stringify({employee_id:payload.employee_id,payroll_month:payload.payroll_month,adjustment_type:payload.adjustment_type,amount_cents:amountCents,reason});payload.idempotency_key=pendingCommandKey(createStorageKey,'payroll-adjustment-ui:create',signature);working.value=true;try{await api.domains.wages.createPayrollAdjustment(payload);clearPendingCommand(createStorageKey,signature);showToast('调整项已追加');form.value={employeeId:'',type:'bonus',amount:'',reason:''};showForm.value=false;await load()}catch(error){showToast(error.message||'保存失败','error')}finally{working.value=false}}
 
-  async function reverse(item){const reason=normalizeReason(window.prompt(`请输入冲销调整项 #${item.id} 的原因`));if(!reason)return;const payload={reason};const signature=JSON.stringify({adjustment_id:item.id,...payload});payload.idempotency_key=pendingCommandKey(reverseStorageKey,'reverse',signature);working.value=true;try{await api.domains.wages.reversePayrollAdjustment(item.id,payload);clearPendingCommand(reverseStorageKey,signature);showToast('冲销记录已追加');await load()}catch(error){showToast(error.message||'冲销失败','error')}finally{working.value=false}}
+  async function reverse(item){const reason=normalizeCommandReason(window.prompt(`请输入冲销调整项 #${item.id} 的原因`));if(!reason)return;const payload={reason};const signature=JSON.stringify({adjustment_id:item.id,...payload});payload.idempotency_key=pendingCommandKey(reverseStorageKey,'payroll-adjustment-ui:reverse',signature);working.value=true;try{await api.domains.wages.reversePayrollAdjustment(item.id,payload);clearPendingCommand(reverseStorageKey,signature);showToast('冲销记录已追加');await load()}catch(error){showToast(error.message||'冲销失败','error')}finally{working.value=false}}
 
   onMounted(()=>{load();loadEmployees()})
 

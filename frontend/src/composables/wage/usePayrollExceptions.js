@@ -1,10 +1,19 @@
 import { computed, onMounted, ref } from 'vue'
 import { api } from '@/lib/api.js'
-import { can } from '@/lib/auth.js'
+import { auth, can } from '@/lib/auth.js'
+import {
+  clearPendingCommand,
+  normalizeCommandReason,
+  pendingCommandKey,
+} from '@/composables/wage/payrollPendingCommands.js'
 import { showToast } from '@/lib/store.js'
+
+const PENDING_AUDIT_PREFIX = 'payroll-audit:pending-command:'
 
 export function usePayrollExceptions() {
   const now = new Date()
+  const storageScope = auth.user?.id || auth.user?.user_id || auth.user?.username || 'anonymous'
+  const auditStorageKey = `${PENDING_AUDIT_PREFIX}${storageScope}:resolve`
 
   const month = ref(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`)
 
@@ -19,6 +28,8 @@ export function usePayrollExceptions() {
   const includeAuditHistory = ref(false)
 
   const auditResolutions = ref({})
+
+  const auditResolutionCodes = ref({})
 
   const loading = ref(false)
 
@@ -60,6 +71,12 @@ export function usePayrollExceptions() {
   function findingLabel(value) { return findingLabels[value] || value }
 
   function findingStatusLabel(value) { return findingStatuses[value] || value }
+
+  function findingResolutionOptions(item) {
+    return Array.isArray(item.allowed_resolution_codes)
+      ? item.allowed_resolution_codes
+      : []
+  }
 
   function findingSnapshot(item) {
     try { return JSON.parse(item.snapshot_json || '{}') } catch (_) { return {} }
@@ -148,6 +165,12 @@ export function usePayrollExceptions() {
       items.value=data.exceptions||[]
       auditFindings.value=auditData.audit_findings||[]
       auditResolutions.value={}
+      auditResolutionCodes.value=Object.fromEntries(
+        auditFindings.value.map(item => {
+          const options = findingResolutionOptions(item)
+          return [item.id, options.length === 1 ? options[0].code : '']
+        })
+      )
     }
     catch (error) { showToast(error.message || '工资异常队列加载失败','error') }
     finally { loading.value=false }
@@ -182,18 +205,32 @@ export function usePayrollExceptions() {
   }
 
   async function resolveAuditFinding(item) {
-    const reason=(auditResolutions.value[item.id]||'').trim()
+    const reason=normalizeCommandReason(auditResolutions.value[item.id])
     if (reason.length < 4) { showToast('请填写至少 4 个字的复核原因','error'); return }
+    const resolution_code = auditResolutionCodes.value[item.id]
+    const allowed = findingResolutionOptions(item).some(
+      option => option.code === resolution_code
+    )
+    if (!allowed) { showToast('请选择有效的复核结论','error'); return }
     if (!window.confirm('此操作只记录人工复核结论，不会修改工资金额，是否继续？')) return
-    const resolution_code = item.finding_type==='high_payroll_deviation'
-      ? 'confirmed_variance'
-      : 'confirmed_distinct_work'
+    const signature = JSON.stringify({
+      finding_id: item.id,
+      resolution_code,
+      resolution_reason: reason,
+    })
+    const idempotency_key = pendingCommandKey(
+      auditStorageKey,
+      'payroll-audit-ui:resolve',
+      signature
+    )
     working.value=true
     try {
       await api.domains.wages.resolvePayrollAuditFinding(item.id,{
         resolution_code,
         resolution_reason:reason,
+        idempotency_key,
       })
+      clearPendingCommand(auditStorageKey, signature)
       showToast('工资审计异常已记录复核结论')
       await load()
     }
@@ -212,6 +249,7 @@ export function usePayrollExceptions() {
     auditStatus,
     includeAuditHistory,
     auditResolutions,
+    auditResolutionCodes,
     loading,
     working,
     editingId,
@@ -228,6 +266,7 @@ export function usePayrollExceptions() {
     statusLabel,
     findingLabel,
     findingStatusLabel,
+    findingResolutionOptions,
     findingSnapshot,
     findingSubject,
     findingEvidence,

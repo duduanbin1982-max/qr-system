@@ -466,8 +466,10 @@ def payroll_audit_finding_resolve(finding_id):
     if not _allowed("wages:approve"):
         return _deny()
     try:
+        data = _json_object()
+        data["idempotency_key"] = _idempotency_key(data)
         return _no_store_json(PayrollAuditService.resolve(
-            finding_id, _actor(), _json_object()
+            finding_id, _actor(), data
         ))
     except (ValueError, RuntimeError) as exc:
         return _json_error(exc)
