@@ -297,6 +297,66 @@ def test_reviewed_payroll_period_control_release_control_transition_is_exact():
         )
 
 
+def test_reviewed_payroll_risk_closure_support_matches_exact_business_merge():
+    repository = Path(__file__).resolve().parents[1]
+    for path, (expected_before, expected_target) in (
+        release.PINNED_PAYROLL_RISK_CLOSURE_TRANSITIONS.items()
+    ):
+        assert release._tree_entry(
+            repository, release.PAYROLL_RISK_CLOSURE_BASELINE, path
+        ) == expected_before, path
+        assert release._tree_entry(
+            repository, release.PAYROLL_RISK_CLOSURE_TARGET, path
+        ) == expected_target, path
+
+    changed = release._git(
+        repository,
+        "diff",
+        "--name-only",
+        release.PAYROLL_RISK_CLOSURE_BASELINE,
+        release.PAYROLL_RISK_CLOSURE_TARGET,
+    ).splitlines()
+    assert set(changed) == {
+        "docs/deployment/payroll-audit-v100-release.md",
+        "frontend/src/composables/wage/payrollPendingCommands.js",
+        "frontend/src/composables/wage/usePayrollAdjustments.js",
+        "frontend/src/composables/wage/usePayrollExceptions.js",
+        "frontend/src/views/wage/PayrollExceptionsTab.vue",
+        "frontend/tests/unit/payroll-audit-behavior.spec.js",
+        "modules/routes/payroll.py",
+        "modules/services/payroll_service.py",
+        "scripts/bootstrap_payroll_audit_v100_release.py",
+        "scripts/deploy-payroll-audit-v100.sh",
+        "scripts/payroll_audit_v100_release.py",
+        "tests/test_payroll_audit_findings.py",
+        "tests/test_payroll_audit_v100_release.py",
+    }
+    release._validate_paths(
+        repository,
+        release.PAYROLL_RISK_CLOSURE_BASELINE,
+        release.PAYROLL_RISK_CLOSURE_TARGET,
+        changed,
+    )
+
+
+def test_payroll_risk_closure_support_rejects_unreviewed_transition_and_path():
+    repository = Path(__file__).resolve().parents[1]
+    with pytest.raises(RuntimeError, match="reviewed baseline and target"):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_RISK_CLOSURE_BASELINE,
+            "3c822a4dc9a87ebaefae02c7a75c881cae4d623c",
+            ["scripts/payroll_audit_v100_release.py"],
+        )
+    with pytest.raises(RuntimeError):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_RISK_CLOSURE_BASELINE,
+            release.PAYROLL_RISK_CLOSURE_TARGET,
+            ["frontend/tests/unit/unreviewed-payroll-risk-closure.spec.js"],
+        )
+
+
 def test_reviewed_payroll_price_uiux_support_matches_exact_business_merge():
     repository = Path(__file__).resolve().parents[1]
     for path, (expected_before, expected_target) in release.PINNED_PAYROLL_PRICE_UIUX_TRANSITIONS.items():
