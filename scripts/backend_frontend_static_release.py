@@ -329,6 +329,38 @@ PINNED_PAYROLL_SETTLEMENT_CONTROL_TRANSITIONS = {
         ("100644", "blob", "5c3fd55d05db4a0c446a188f7f39fa38e09f2637"),
     ),
 }
+# PR #182 is a V100-to-V100 backend/static release. Its target also contains
+# the independently reviewed V100 release controls introduced after the
+# production baseline. Admit only these exact support objects for this exact
+# production-to-business-merge pair; migrations remain prohibited.
+PAYROLL_RISK_CLOSURE_BASELINE = "4c662f8b807a82bcaa298f663d49b39a28823d0f"
+PAYROLL_RISK_CLOSURE_TARGET = "365811af5fbe31130b50ad85441d4e1754a36667"
+PINNED_PAYROLL_RISK_CLOSURE_TRANSITIONS = {
+    "docs/deployment/payroll-audit-v100-release.md": (
+        None,
+        ("100644", "blob", "3cefea664abe36036084116811b81f499164921c"),
+    ),
+    "frontend/tests/unit/payroll-audit-behavior.spec.js": (
+        ("100644", "blob", "14313b76e1775558f78b07fb067877b6b9e5d65f"),
+        ("100644", "blob", "12a0ef71ac914866d30a373479d29bc47e9008ac"),
+    ),
+    "scripts/bootstrap_payroll_audit_v100_release.py": (
+        None,
+        ("100644", "blob", "3972b27a4b334932ad913ebb30b44d40830ecc35"),
+    ),
+    "scripts/deploy-payroll-audit-v100.sh": (
+        None,
+        ("100644", "blob", "da9cf4b147c553f8e4a92087185f925f5fee47d3"),
+    ),
+    "scripts/payroll_audit_v100_release.py": (
+        None,
+        ("100644", "blob", "5663bd4c07203ad253671ab2dbf0bfd8dd0a5d87"),
+    ),
+    "tests/test_payroll_audit_v100_release.py": (
+        None,
+        ("100644", "blob", "24f8400df4449175f15f799670d422d1b9911525"),
+    ),
+}
 # PR #167 also changed this release-control script. Admit only the exact
 # production-to-business-merge transition alongside the reviewed test pin.
 PINNED_PRODUCT_CODE_SEARCH_CONTROL_TRANSITIONS = {
@@ -453,6 +485,13 @@ def _validate_support_transition(repository, before, target, path):
             PAYROLL_SETTLEMENT_BASELINE,
             PAYROLL_SETTLEMENT_TARGET,
             f"payroll settlement support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
+            "payroll risk closure",
+            PINNED_PAYROLL_RISK_CLOSURE_TRANSITIONS,
+            PAYROLL_RISK_CLOSURE_BASELINE,
+            PAYROLL_RISK_CLOSURE_TARGET,
+            f"payroll risk closure support exception requires the reviewed baseline and target: {path}",
         ),
         (
             "payroll price UI",
@@ -641,6 +680,7 @@ def _validate_paths(repository, before, target, changed):
             or normalized in PINNED_PAYROLL_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_PERIOD_CONTROL_TRANSITIONS
             or normalized in PINNED_PAYROLL_SETTLEMENT_SUPPORT_TRANSITIONS
+            or normalized in PINNED_PAYROLL_RISK_CLOSURE_TRANSITIONS
             or normalized in PINNED_ORDERS_SUPPORT_TRANSITIONS
             or normalized in PINNED_CUSTOMER_SUPPORT_TRANSITIONS
             or normalized in PINNED_MATERIALS_SUPPORT_TRANSITIONS
