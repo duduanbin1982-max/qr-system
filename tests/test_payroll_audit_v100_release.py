@@ -11,6 +11,9 @@ from scripts import backend_frontend_static_release as static_release
 from scripts import payroll_audit_v100_release as payroll_release
 
 
+REVIEWED_TOOL_COMMIT = "3c822a4dc9a87ebaefae02c7a75c881cae4d623c"
+
+
 def _database(path, version=98):
     path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(conftest.TEST_TEMPLATE_DB, path)
@@ -281,7 +284,22 @@ def test_v100_replica_trial_preserves_v98_facts_and_is_idempotent(tmp_path):
 def test_preflight_accepts_only_reviewed_tool_commit_and_v98_production(tmp_path, monkeypatch):
     repository = Path(__file__).resolve().parents[1]
     monkeypatch.setattr(payroll_release, "_assert_clean", lambda *_args, **_kwargs: None)
+    tool = tmp_path / "release-tool"
     project = tmp_path / "production"
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "worktree",
+            "add",
+            "--quiet",
+            "--detach",
+            str(tool),
+            REVIEWED_TOOL_COMMIT,
+        ],
+        check=True,
+    )
     subprocess.run(
         [
             "git",
@@ -302,16 +320,14 @@ def test_preflight_accepts_only_reviewed_tool_commit_and_v98_production(tmp_path
         )
         database = _database(project / "data/production.db")
         result = payroll_release.validate_release(
-            repository,
+            tool,
             project,
             database,
             payroll_release.BASELINE_COMMIT,
             payroll_release.TARGET_COMMIT,
         )
 
-        assert result["tool_commit"] == subprocess.check_output(
-            ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True
-        ).strip()
+        assert result["tool_commit"] == REVIEWED_TOOL_COMMIT
         assert result["source_schema_version"] == 98
         assert result["target_schema_version"] == 100
         assert result["replica_trial"]["target"]["user_version"] == 100
@@ -323,12 +339,21 @@ def test_preflight_accepts_only_reviewed_tool_commit_and_v98_production(tmp_path
             }
         )
     finally:
-        subprocess.run(
-            ["git", "-C", str(repository), "worktree", "remove", "--force", str(project)],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        for worktree in (project, tool):
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    "worktree",
+                    "remove",
+                    "--force",
+                    str(worktree),
+                ],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
 
 
 def test_failed_replica_migration_does_not_change_source_database(tmp_path, monkeypatch):
