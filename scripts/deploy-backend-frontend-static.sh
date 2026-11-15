@@ -105,6 +105,7 @@ build_static() {
     printf 'cache=%s\nfund=false\naudit=false\nupdate-notifier=false\n' "$NPM_CACHE" > "$NPM_CONFIG"
     (
         cd "$WORKTREE"
+        export FRONTEND_LAYER_BASE_REF="$EXPECTED_BEFORE"
         "$NODE_BIN" frontend/scripts/check-toolchain.mjs
         NPM_CONFIG_USERCONFIG="$NPM_CONFIG" NPM_CONFIG_CACHE="$NPM_CACHE" "$NPM_BIN" ci --ignore-scripts --no-audit --no-fund --cache "$NPM_CACHE"
         NPM_CONFIG_USERCONFIG="$NPM_CONFIG" NPM_CONFIG_CACHE="$NPM_CACHE" "$NPM_BIN" run check:api
