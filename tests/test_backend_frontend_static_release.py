@@ -1170,6 +1170,7 @@ def test_static_release_shell_keeps_migrations_out_of_path_and_uses_isolated_bui
     assert "$${BASH_SOURCE[0]}" not in script
     assert '"$NPM_BIN" ci --ignore-scripts --no-audit --no-fund' in script
     assert 'worktree add --quiet --detach "$WORKTREE"' in script
+    assert 'export FRONTEND_LAYER_BASE_REF="$EXPECTED_BEFORE"' in script
     assert "exchange-static" in script
     assert "authorize-release" in script
     assert "rollback-deployment.sh" in script or '"$ROLLBACK"' in script
@@ -1254,7 +1255,8 @@ def _shell_release_fixture(tmp_path, scenario="success"):
         fence = json.loads(fence_path.read_text()) if fence_path.exists() else {}
         manifest_path = project / "data/deployments/shell-release.json"
         manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
-        event = {"command": name, "args": args, "commit": marker, "fenced": bool(fence), "status": manifest.get("status")}
+        event = {"command": name, "args": args, "commit": marker, "fenced": bool(fence),
+                 "status": manifest.get("status"), "frontend_layer_base_ref": os.environ.get("FRONTEND_LAYER_BASE_REF")}
         with (state / "calls.jsonl").open("a") as output:
             output.write(json.dumps(event) + "\\n")
         if name == "git":
@@ -1354,6 +1356,11 @@ def test_real_static_launcher_check_only_has_no_production_side_effects(tmp_path
     assert (fixture.state / "service").read_text() == "active"
     calls = [json.loads(line) for line in (fixture.state / "calls.jsonl").read_text().splitlines()]
     assert all(call["args"][1] == "is-active" for call in calls if call["command"] == "systemctl")
+    assert all(
+        call["frontend_layer_base_ref"] == fixture.before
+        for call in calls
+        if call["command"] in {"node", "npm"}
+    )
     assert (fixture.production / ".deployed_commit").read_text().strip() == fixture.before
 
 
