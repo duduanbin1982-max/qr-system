@@ -93,6 +93,7 @@ preflight() {
 build_static() {
     git -C "$TOOL_ROOT" worktree add --quiet --detach "$WORKTREE" "$TARGET_COMMIT"
     [[ -f "$WORKTREE/package.json" && -f "$WORKTREE/package-lock.json" ]] || { echo "Locked frontend inputs missing" >&2; return 1; }
+    export FRONTEND_LAYER_BASE_REF="$EXPECTED_BEFORE"
     command -v "$NODE_BIN" >/dev/null && command -v "$NPM_BIN" >/dev/null || { echo "Pinned Node/npm binaries unavailable" >&2; return 1; }
     export PATH="$(dirname "$(command -v "$NODE_BIN")"):$(dirname "$(command -v "$NPM_BIN")"):$PATH"
     local wanted_node wanted_npm actual_node actual_npm
@@ -105,7 +106,6 @@ build_static() {
     printf 'cache=%s\nfund=false\naudit=false\nupdate-notifier=false\n' "$NPM_CACHE" > "$NPM_CONFIG"
     (
         cd "$WORKTREE"
-        export FRONTEND_LAYER_BASE_REF="$EXPECTED_BEFORE"
         "$NODE_BIN" frontend/scripts/check-toolchain.mjs
         NPM_CONFIG_USERCONFIG="$NPM_CONFIG" NPM_CONFIG_CACHE="$NPM_CACHE" "$NPM_BIN" ci --ignore-scripts --no-audit --no-fund --cache "$NPM_CACHE"
         NPM_CONFIG_USERCONFIG="$NPM_CONFIG" NPM_CONFIG_CACHE="$NPM_CACHE" "$NPM_BIN" run check:api
