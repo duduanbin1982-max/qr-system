@@ -191,24 +191,41 @@ export function usePayrollLedger() {
     catch (error) { showToast(error.message || '批次明细加载失败', 'error') }
   }
 
-  async function openLineSources(line, page = 1) {
+  async function openLineSources(line, page = 1, pinnedCalculationVersion) {
     if (!detail.value?.batch?.id) return
     const batchId = detail.value.batch.id
+    const calculationVersion = pinnedCalculationVersion ?? (
+      page > 1 ? sourceDetail.value?.calculation_version : undefined
+    )
+    const requiresPinnedVersion = page > 1 || pinnedCalculationVersion !== undefined
+    if (requiresPinnedVersion && calculationVersion === undefined) {
+      showToast('请从第一页重新打开来源明细', 'error')
+      return
+    }
     const requestToken = ++sourceRequestToken
     sourceLine.value = line
     sourceDetail.value = null
     sourceLoading.value = true
     try {
+      const params = { page, limit: 50 }
+      if (calculationVersion !== undefined) {
+        params.calculation_version = calculationVersion
+      }
       const result = await api.domains.wages.getPayrollLineSources(
         batchId,
         line.id,
-        { page, limit: 50 },
+        params,
       )
       if (requestToken === sourceRequestToken && detail.value?.batch?.id === batchId) {
         sourceDetail.value = result
       }
     } catch (error) {
-      if (requestToken === sourceRequestToken) showToast(error.message || '工资来源加载失败', 'error')
+      if (requestToken === sourceRequestToken) {
+        showToast(error.message || '工资来源加载失败', 'error')
+        if (error.status === 409 && selectedId.value === batchId) {
+          await openBatch({ id: batchId })
+        }
+      }
     }
     finally {
       if (requestToken === sourceRequestToken) sourceLoading.value = false
@@ -217,7 +234,12 @@ export function usePayrollLedger() {
 
   function changeSourcePage(page) {
     if (!sourceLine.value || page < 1) return
-    return openLineSources(sourceLine.value, page)
+    const calculationVersion = sourceDetail.value?.calculation_version
+    if (calculationVersion === undefined) {
+      showToast('请从第一页重新打开来源明细', 'error')
+      return
+    }
+    return openLineSources(sourceLine.value, page, calculationVersion)
   }
 
   function exportBatch(batch) { window.open(`/api/payroll/batches/${batch.id}/export`, '_blank', 'noopener') }

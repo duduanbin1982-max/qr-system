@@ -170,6 +170,98 @@ def test_source_drilldown_is_paginated_and_returns_structured_snapshot(client, m
     assert result["items"][0]["amount_yuan"] == "3.75"
 
 
+def test_source_drilldown_pagination_rejects_a_recalculated_snapshot(client, monkeypatch):
+    with client.application.app_context():
+        db = get_db()
+        own_id, other_id = _employees(db)
+        batch_id = _batch(db, own_id, other_id, status="draft")
+        line_id = db.execute(
+            "SELECT id FROM payroll_employee_lines WHERE batch_id=? AND employee_id=?",
+            (batch_id, own_id),
+        ).fetchone()["id"]
+        db.execute(
+            "UPDATE payroll_batches SET audit_run_version=1 WHERE id=?",
+            (batch_id,),
+        )
+        db.execute(
+            "UPDATE payroll_detail_lines SET source_snapshot_json=? "
+            "WHERE batch_id=? AND employee_line_id=?",
+            ('{"work_record_id": 41, "product_code": "P-OLD"}', batch_id, line_id),
+        )
+        db.execute(
+            "INSERT INTO payroll_detail_lines "
+            "(batch_id,employee_line_id,source_type,source_id,quantity,amount_cents,source_snapshot_json) "
+            "VALUES (?,?,'normal_work',9002,1,100,'{\"work_record_id\": 42, \"product_code\": \"P-OLD\"}')",
+            (batch_id, line_id),
+        )
+        db.commit()
+
+    headers = _authenticate(monkeypatch, own_id, ["wages:view_all"])
+    first_page = client.get(
+        f"/api/payroll/batches/{batch_id}/lines/{line_id}/sources?page=1&limit=1",
+        headers=headers,
+    )
+    assert first_page.status_code == 200
+    first_result = first_page.get_json()
+    assert first_result["calculation_version"] == 1
+    assert first_result["items"][0]["source_snapshot"]["product_code"] == "P-OLD"
+
+    with client.application.app_context():
+        db = get_db()
+        db.execute("BEGIN IMMEDIATE")
+        db.execute(
+            "DELETE FROM payroll_detail_lines WHERE batch_id=? AND employee_line_id=?",
+            (batch_id, line_id),
+        )
+        db.execute("DELETE FROM payroll_employee_lines WHERE id=?", (line_id,))
+        new_line_id = db.execute(
+            "INSERT INTO payroll_employee_lines "
+            "(batch_id,employee_id,employee_name_snapshot,normal_quantity,"
+            "normal_wage_cents,payable_wage_cents) VALUES (?,?,?,2,200,200)",
+            (batch_id, own_id, "本人"),
+        ).lastrowid
+        db.execute(
+            "INSERT INTO payroll_detail_lines "
+            "(batch_id,employee_line_id,source_type,source_id,quantity,amount_cents,source_snapshot_json) "
+            "VALUES (?,?,'normal_work',9003,1,100,'{\"work_record_id\": 43, \"product_code\": \"P-NEW\"}')",
+            (batch_id, new_line_id),
+        )
+        db.execute(
+            "INSERT INTO payroll_detail_lines "
+            "(batch_id,employee_line_id,source_type,source_id,quantity,amount_cents,source_snapshot_json) "
+            "VALUES (?,?,'normal_work',9004,1,100,'{\"work_record_id\": 44, \"product_code\": \"P-NEW\"}')",
+            (batch_id, new_line_id),
+        )
+        db.execute(
+            "UPDATE payroll_batches SET audit_run_version=2 WHERE id=?",
+            (batch_id,),
+        )
+        db.commit()
+
+    stale_page = client.get(
+        f"/api/payroll/batches/{batch_id}/lines/{line_id}/sources"
+        "?page=2&limit=1&calculation_version=1",
+        headers=headers,
+    )
+    assert stale_page.status_code == 409
+    assert "已重算" in stale_page.get_json()["error"]
+
+    unpinned_page = client.get(
+        f"/api/payroll/batches/{batch_id}/lines/{new_line_id}/sources?page=2&limit=1",
+        headers=headers,
+    )
+    assert unpinned_page.status_code == 400
+
+    current_page = client.get(
+        f"/api/payroll/batches/{batch_id}/lines/{new_line_id}/sources"
+        "?page=1&limit=1&calculation_version=2",
+        headers=headers,
+    )
+    assert current_page.status_code == 200
+    assert current_page.get_json()["calculation_version"] == 2
+    assert current_page.get_json()["items"][0]["source_snapshot"]["product_code"] == "P-NEW"
+
+
 def test_source_drilldown_self_scope_rejects_draft_and_other_employee(client, monkeypatch):
     with client.application.app_context():
         db = get_db()
