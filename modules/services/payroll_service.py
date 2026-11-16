@@ -3,6 +3,7 @@
 from datetime import datetime
 import hashlib
 import json
+from decimal import Decimal
 from modules.domain.payroll_policy import (
     PayrollConflictError,
     cents_to_yuan,
@@ -11,6 +12,7 @@ from modules.domain.payroll_policy import (
     work_amount_cents,
     yuan_to_cents,
 )
+from modules.domain.errors import AuthorizationError
 from modules.domain.reporting_day import reporting_month_bounds
 from modules.domain.payroll_audit_rules import (
     PAYROLL_AUDIT_RULE_VERSION,
@@ -800,6 +802,15 @@ class PayrollCalculationService:
 
 
 class PayrollWorkflowService:
+    SOURCE_TYPE_LABELS = {
+        "normal_work": "正常报工",
+        "rework_work": "返工报工",
+        "bonus": "奖金调整",
+        "allowance": "补贴调整",
+        "deduction": "扣款调整",
+        "legacy_snapshot": "历史快照",
+    }
+
     @staticmethod
     def create_batch(month, actor_user, idempotency_key, revision_reason="", supersedes_batch_id=None):
         month = validate_payroll_month(month)
@@ -1259,6 +1270,59 @@ class PayrollWorkflowService:
                 batch_id=batch_id, current_only=True, db=db
             ),
             "events": PayrollRepository.list_events(batch_id, db),
+        }
+
+    @staticmethod
+    def line_sources(batch_id, employee_line_id, *, employee_id=None, page=1, limit=50):
+        db = BaseService.db()
+        batch = PayrollRepository.get_batch(batch_id, db)
+        if not batch:
+            raise ValueError("工资批次不存在")
+        line = PayrollRepository.get_employee_line(batch_id, employee_line_id, db)
+        if not line:
+            raise ValueError("工资员工明细不存在")
+        if employee_id is not None:
+            if batch["status"] != "confirmed":
+                raise AuthorizationError("仅可查看本人已确认工资来源")
+            if line.get("employee_id") != employee_id:
+                raise AuthorizationError("无权限查看他人工资来源")
+        page = max(int(page), 1)
+        limit = max(1, min(int(limit), 200))
+        total = PayrollRepository.count_line_details(batch_id, employee_line_id, db)
+        items = PayrollRepository.list_line_details(
+            batch_id, employee_line_id, page=page, limit=limit, db=db
+        )
+        for item in items:
+            raw_snapshot = item.pop("source_snapshot_json", "{}") or "{}"
+            try:
+                item["source_snapshot"] = json.loads(raw_snapshot)
+            except (TypeError, ValueError):
+                item["source_snapshot"] = {}
+            item["source_type_label"] = PayrollWorkflowService.SOURCE_TYPE_LABELS.get(
+                item.get("source_type"), item.get("source_type", "未知来源")
+            )
+            item["unit_price_yuan"] = (
+                f"{Decimal(int(item.get('unit_price_micros') or 0)) / Decimal(10000):.4f}"
+            )
+            item["amount_yuan"] = cents_to_yuan(item.get("amount_cents", 0))
+        return {
+            "batch": {
+                "id": batch["id"],
+                "payroll_month": batch["payroll_month"],
+                "version": batch["version"],
+                "status": batch["status"],
+            },
+            "line": {
+                key: line.get(key)
+                for key in (
+                    "id", "employee_id", "employee_name_snapshot", "employee_no_snapshot",
+                    "normal_quantity", "rework_quantity", "payable_wage_cents",
+                )
+            },
+            "items": items,
+            "total": total,
+            "page": page,
+            "limit": limit,
         }
 
     @staticmethod

@@ -658,6 +658,40 @@ class PayrollRepository:
         ).fetchall()]
 
     @staticmethod
+    def get_employee_line(batch_id, employee_line_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT * FROM payroll_employee_lines WHERE batch_id=? AND id=?",
+            (batch_id, employee_line_id),
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def count_line_details(batch_id, employee_line_id, db=None):
+        db = resolve_db(db)
+        row = db.execute(
+            "SELECT COUNT(*) AS total FROM payroll_detail_lines "
+            "WHERE batch_id=? AND employee_line_id=?",
+            (batch_id, employee_line_id),
+        ).fetchone()
+        return int(row["total"])
+
+    @staticmethod
+    def list_line_details(batch_id, employee_line_id, page=1, limit=50, db=None):
+        db = resolve_db(db)
+        page = max(int(page), 1)
+        limit = max(1, min(int(limit), 200))
+        offset = (page - 1) * limit
+        return [dict(row) for row in db.execute(
+            "SELECT d.*,el.employee_id,el.employee_name_snapshot,el.employee_no_snapshot "
+            "FROM payroll_detail_lines d "
+            "JOIN payroll_employee_lines el ON el.id=d.employee_line_id "
+            "WHERE d.batch_id=? AND d.employee_line_id=? "
+            "ORDER BY d.id LIMIT ? OFFSET ?",
+            (batch_id, employee_line_id, limit, offset),
+        ).fetchall()]
+
+    @staticmethod
     def list_events(batch_id, db=None):
         db = resolve_db(db)
         return [dict(row) for row in db.execute(

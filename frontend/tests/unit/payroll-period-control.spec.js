@@ -50,4 +50,78 @@ describe('payroll period control', () => {
     expect(wrapper.text()).toContain(control.can_adjust ? '数据截止' : '不允许直接新增调整')
     wrapper.unmount()
   })
+
+  it('loads paginated source drilldown for an employee line', async () => {
+    mocks.wages.listPayrollBatches.mockResolvedValue({
+      batches: [{ id: 7, payroll_month: '2026-09', version: 2, status: 'confirmed', payable_wage_cents: 1000 }],
+    })
+    mocks.wages.getPayrollBatch = vi.fn().mockResolvedValue({
+      batch: { id: 7, payroll_month: '2026-09', version: 2, status: 'confirmed', period_start: '2026-09-01', period_end: '2026-10-01', source_cutoff_at: '2026-10-01 07:00:00' },
+      lines: [{ id: 11, employee_name_snapshot: '员工A', employee_no_snapshot: 'A-11', normal_quantity: 1, rework_quantity: 0, normal_wage_cents: 1000, rework_wage_cents: 0, bonus_cents: 0, allowance_cents: 0, deduction_cents: 0, payable_wage_cents: 1000 }],
+      details: [], exceptions: [], audit_findings: [],
+    })
+    mocks.wages.getPayrollLineSources = vi.fn().mockResolvedValue({
+      line: { id: 11, employee_name_snapshot: '员工A', employee_no_snapshot: 'A-11' },
+      items: [{ id: 101, source_type_label: '正常报工', order_no_snapshot: 'SO-1', product_code_snapshot: 'P-1', route_name_snapshot: '路线A', process_name_snapshot: '工序A', quantity: 1, unit_price_yuan: '1.0000', amount_cents: 100 }],
+      total: 1, page: 1, limit: 50,
+    })
+    const wrapper = mount(PayrollLedgerTab)
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === '查看').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === '查看来源').trigger('click')
+    await flushPromises()
+
+    expect(mocks.wages.getPayrollBatch).toHaveBeenCalledWith(7)
+    expect(mocks.wages.getPayrollLineSources).toHaveBeenCalledWith(7, 11, { page: 1, limit: 50 })
+    expect(wrapper.text()).toContain('来源下钻')
+    expect(wrapper.text()).toContain('正常报工')
+    expect(wrapper.text()).toContain('SO-1')
+    wrapper.unmount()
+  })
+
+  it('ignores a stale source response after switching batches', async () => {
+    let resolveSources
+    mocks.wages.listPayrollBatches.mockResolvedValue({
+      batches: [
+        { id: 7, payroll_month: '2026-09', version: 2, status: 'confirmed', payable_wage_cents: 1000 },
+        { id: 8, payroll_month: '2026-10', version: 1, status: 'confirmed', payable_wage_cents: 1200 },
+      ],
+    })
+    mocks.wages.getPayrollBatch = vi.fn()
+      .mockResolvedValueOnce({
+        batch: { id: 7, payroll_month: '2026-09', version: 2 },
+        lines: [{ id: 11, employee_name_snapshot: '员工A', employee_no_snapshot: 'A-11' }],
+        details: [], exceptions: [], audit_findings: [],
+      })
+      .mockResolvedValueOnce({
+        batch: { id: 8, payroll_month: '2026-10', version: 1 },
+        lines: [{ id: 22, employee_name_snapshot: '员工B', employee_no_snapshot: 'B-22' }],
+        details: [], exceptions: [], audit_findings: [],
+      })
+    mocks.wages.getPayrollLineSources = vi.fn().mockImplementation(() => new Promise(resolve => {
+      resolveSources = resolve
+    }))
+
+    const wrapper = mount(PayrollLedgerTab)
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === '查看').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === '查看来源').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === '关闭').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === '查看').trigger('click')
+    await flushPromises()
+
+    resolveSources({
+      line: { id: 11, employee_name_snapshot: '员工A' },
+      items: [{ id: 101, source_type_label: '旧批次来源' }],
+      total: 1, page: 1, limit: 50,
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('旧批次来源')
+    wrapper.unmount()
+  })
 })

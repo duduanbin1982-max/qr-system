@@ -124,6 +124,78 @@ def test_privileged_batch_reader_preserves_full_metadata(client, monkeypatch, pe
     assert result["events"][0]["reason"] == "他人工资调整"
 
 
+def test_source_drilldown_is_paginated_and_returns_structured_snapshot(client, monkeypatch):
+    with client.application.app_context():
+        db = get_db()
+        own_id, other_id = _employees(db)
+        batch_id = _batch(db, own_id, other_id, status="draft")
+        line_id = db.execute(
+            "SELECT id FROM payroll_employee_lines WHERE batch_id=? AND employee_id=?",
+            (batch_id, own_id),
+        ).fetchone()["id"]
+        db.execute(
+            "UPDATE payroll_detail_lines SET source_snapshot_json=?,order_no_snapshot=?,"
+            "product_code_snapshot=?,route_name_snapshot=?,process_name_snapshot=?,"
+            "quantity=?,unit_price_micros=?,amount_cents=?,work_recorded_at=? "
+            "WHERE batch_id=? AND employee_line_id=?",
+            (
+                '{"work_record_id": 41, "product_code": "P-41"}',
+                "SO-41", "P-41", "路线A", "工序A", 3, 12500, 375,
+                "2026-07-01 08:00:00", batch_id, line_id,
+            ),
+        )
+        db.execute(
+            "INSERT INTO payroll_detail_lines (batch_id,employee_line_id,source_type,source_id,"
+            "quantity,unit_price_micros,amount_cents,source_snapshot_json) "
+            "VALUES (?,?,?, ?,?,?,?,?)",
+            (batch_id, line_id, "bonus", 9001, 0, 0, 500, '{"reason":"满勤"}'),
+        )
+        for next_status in ("review_pending", "locked", "confirmed"):
+            db.execute("UPDATE payroll_batches SET status=? WHERE id=?", (next_status, batch_id))
+        db.commit()
+    headers = _authenticate(monkeypatch, own_id, ["wages:view_self"])
+    response = client.get(
+        f"/api/payroll/batches/{batch_id}/lines/{line_id}/sources?page=1&limit=1",
+        headers=headers,
+    )
+    assert response.status_code == 200
+    result = response.get_json()
+    assert result["total"] == 2
+    assert result["page"] == 1
+    assert result["limit"] == 1
+    assert len(result["items"]) == 1
+    assert result["items"][0]["source_snapshot"]["work_record_id"] == 41
+    assert result["items"][0]["source_type_label"] == "正常报工"
+    assert result["items"][0]["unit_price_yuan"] == "1.2500"
+    assert result["items"][0]["amount_yuan"] == "3.75"
+
+
+def test_source_drilldown_self_scope_rejects_draft_and_other_employee(client, monkeypatch):
+    with client.application.app_context():
+        db = get_db()
+        own_id, other_id = _employees(db)
+        batch_id = _batch(db, own_id, other_id, status="draft")
+        lines = db.execute(
+            "SELECT id,employee_id FROM payroll_employee_lines WHERE batch_id=? ORDER BY id",
+            (batch_id,),
+        ).fetchall()
+    headers = _authenticate(monkeypatch, own_id, ["wages:view_self"])
+    assert client.get(
+        f"/api/payroll/batches/{batch_id}/lines/{lines[0]['id']}/sources",
+        headers=headers,
+    ).status_code == 403
+
+    with client.application.app_context():
+        db = get_db()
+        for next_status in ("review_pending", "locked", "confirmed"):
+            db.execute("UPDATE payroll_batches SET status=? WHERE id=?", (next_status, batch_id))
+        db.commit()
+    assert client.get(
+        f"/api/payroll/batches/{batch_id}/lines/{lines[1]['id']}/sources",
+        headers=headers,
+    ).status_code == 403
+
+
 GLOBAL_READS = (
     "/api/daily-report?date=2026-07-01",
     "/api/wages/monthly-summary?year_month=2026-07",
