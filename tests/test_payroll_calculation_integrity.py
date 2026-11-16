@@ -162,6 +162,38 @@ def _save_legacy_calculation_events(monkeypatch):
     )
 
 
+def test_source_drilldown_keeps_the_values_captured_during_batch_generation(
+    client, calculation_clock
+):
+    with client.application.app_context():
+        db = get_db()
+        preparer, _approver = _actors(db)
+        worker_id, _route_id, _process_id, _actor = _seed_price_and_work(db)
+        batch = PayrollWorkflowService.create_batch(
+            "2026-07", preparer, "integrity-source-snapshot"
+        )
+        line = PayrollRepository.list_lines(batch["id"], db=db)[0]
+        detail = PayrollRepository.list_details(batch["id"], db=db)[0]
+        captured = json.loads(detail["source_snapshot_json"])
+
+        db.execute("UPDATE users SET name='员工新姓名' WHERE id=?", (worker_id,))
+        db.execute(
+            "UPDATE orders SET product_code='PAY-PRODUCT-CHANGED' WHERE id=?",
+            (detail["order_id"],),
+        )
+        db.commit()
+
+        result = PayrollWorkflowService.line_sources(
+            batch["id"], line["id"], page=1, limit=50,
+            calculation_version=batch["audit_run_version"],
+        )
+
+    snapshot = result["items"][0]["source_snapshot"]
+    assert result["calculation_version"] == batch["audit_run_version"]
+    assert snapshot["employee_name"] == captured["employee_name"] == "工资测试员工"
+    assert snapshot["product_code"] == captured["product_code"] == "PAY-PRODUCT"
+
+
 def test_exception_approval_invalidates_version_and_requires_regeneration(
     client, calculation_clock
 ):

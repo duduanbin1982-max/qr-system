@@ -1273,57 +1273,93 @@ class PayrollWorkflowService:
         }
 
     @staticmethod
-    def line_sources(batch_id, employee_line_id, *, employee_id=None, page=1, limit=50):
+    def line_sources(
+        batch_id,
+        employee_line_id,
+        *,
+        employee_id=None,
+        page=1,
+        limit=50,
+        calculation_version=None,
+    ):
         db = BaseService.db()
-        batch = PayrollRepository.get_batch(batch_id, db)
-        if not batch:
-            raise ValueError("工资批次不存在")
-        line = PayrollRepository.get_employee_line(batch_id, employee_line_id, db)
-        if not line:
-            raise ValueError("工资员工明细不存在")
-        if employee_id is not None:
-            if batch["status"] != "confirmed":
-                raise AuthorizationError("仅可查看本人已确认工资来源")
-            if line.get("employee_id") != employee_id:
-                raise AuthorizationError("无权限查看他人工资来源")
         page = max(int(page), 1)
         limit = max(1, min(int(limit), 200))
-        total = PayrollRepository.count_line_details(batch_id, employee_line_id, db)
-        items = PayrollRepository.list_line_details(
-            batch_id, employee_line_id, page=page, limit=limit, db=db
-        )
-        for item in items:
-            raw_snapshot = item.pop("source_snapshot_json", "{}") or "{}"
+        if calculation_version not in (None, ""):
             try:
-                item["source_snapshot"] = json.loads(raw_snapshot)
-            except (TypeError, ValueError):
-                item["source_snapshot"] = {}
-            item["source_type_label"] = PayrollWorkflowService.SOURCE_TYPE_LABELS.get(
-                item.get("source_type"), item.get("source_type", "未知来源")
+                calculation_version = int(calculation_version)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("工资计算版本无效") from exc
+            if calculation_version < 0:
+                raise ValueError("工资计算版本无效")
+        elif page > 1:
+            raise ValueError("请携带第一页返回的计算版本继续分页")
+
+        owns_read_transaction = not db.in_transaction
+        if owns_read_transaction:
+            db.execute("BEGIN")
+        try:
+            batch = PayrollRepository.get_batch(batch_id, db)
+            if not batch:
+                raise ValueError("工资批次不存在")
+            current_calculation_version = int(batch.get("audit_run_version") or 0)
+            if (
+                calculation_version is not None
+                and calculation_version != current_calculation_version
+            ):
+                raise PayrollConflictError("工资批次已重算，来源快照已更新，请重新打开批次")
+            line = PayrollRepository.get_employee_line(batch_id, employee_line_id, db)
+            if not line:
+                raise ValueError("工资员工明细不存在")
+            if employee_id is not None:
+                if batch["status"] != "confirmed":
+                    raise AuthorizationError("仅可查看本人已确认工资来源")
+                if line.get("employee_id") != employee_id:
+                    raise AuthorizationError("无权限查看他人工资来源")
+            total = PayrollRepository.count_line_details(batch_id, employee_line_id, db)
+            items = PayrollRepository.list_line_details(
+                batch_id, employee_line_id, page=page, limit=limit, db=db
             )
-            item["unit_price_yuan"] = (
-                f"{Decimal(int(item.get('unit_price_micros') or 0)) / Decimal(10000):.4f}"
-            )
-            item["amount_yuan"] = cents_to_yuan(item.get("amount_cents", 0))
-        return {
-            "batch": {
-                "id": batch["id"],
-                "payroll_month": batch["payroll_month"],
-                "version": batch["version"],
-                "status": batch["status"],
-            },
-            "line": {
-                key: line.get(key)
-                for key in (
-                    "id", "employee_id", "employee_name_snapshot", "employee_no_snapshot",
-                    "normal_quantity", "rework_quantity", "payable_wage_cents",
+            for item in items:
+                raw_snapshot = item.pop("source_snapshot_json", "{}") or "{}"
+                try:
+                    item["source_snapshot"] = json.loads(raw_snapshot)
+                except (TypeError, ValueError):
+                    item["source_snapshot"] = {}
+                item["source_type_label"] = PayrollWorkflowService.SOURCE_TYPE_LABELS.get(
+                    item.get("source_type"), item.get("source_type", "未知来源")
                 )
-            },
-            "items": items,
-            "total": total,
-            "page": page,
-            "limit": limit,
-        }
+                item["unit_price_yuan"] = (
+                    f"{Decimal(int(item.get('unit_price_micros') or 0)) / Decimal(10000):.4f}"
+                )
+                item["amount_yuan"] = cents_to_yuan(item.get("amount_cents", 0))
+            result = {
+                "batch": {
+                    "id": batch["id"],
+                    "payroll_month": batch["payroll_month"],
+                    "version": batch["version"],
+                    "status": batch["status"],
+                },
+                "line": {
+                    key: line.get(key)
+                    for key in (
+                        "id", "employee_id", "employee_name_snapshot", "employee_no_snapshot",
+                        "normal_quantity", "rework_quantity", "payable_wage_cents",
+                    )
+                },
+                "calculation_version": current_calculation_version,
+                "items": items,
+                "total": total,
+                "page": page,
+                "limit": limit,
+            }
+            if owns_read_transaction:
+                db.commit()
+            return result
+        except Exception:
+            if owns_read_transaction:
+                db.rollback()
+            raise
 
     @staticmethod
     def my_payroll(actor_user, month=""):

@@ -164,8 +164,9 @@ def payroll_line_sources(batch_id, employee_line_id):
             employee_id=employee_id,
             page=pagination["page"],
             limit=pagination["limit"],
+            calculation_version=request.args.get("calculation_version"),
         ))
-    except ValueError as exc:
+    except (ValueError, PayrollConflictError) as exc:
         return _json_error(exc)
 
 
