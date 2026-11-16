@@ -296,6 +296,30 @@ PINNED_PAYROLL_PERIOD_CONTROL_CONTROL_TRANSITIONS = {
         ("100644", "blob", "5529ae62c37d166b299477c28dfe575ec6068815"),
     ),
 }
+# PR #185 adds payroll source drilldown. Admit its test support and cumulative
+# release-control history only for this exact production-to-merge transition.
+PAYROLL_B3_SOURCE_DRILLDOWN_BASELINE = "365811af5fbe31130b50ad85441d4e1754a36667"
+PAYROLL_B3_SOURCE_DRILLDOWN_TARGET = "bbbfdea6fa50ba296cb122cfcd4bffa85ad5e118"
+PINNED_PAYROLL_B3_SOURCE_DRILLDOWN_SUPPORT_TRANSITIONS = {
+    "frontend/tests/unit/payroll-period-control.spec.js": (
+        ("100644", "blob", "305eba2e360ec75e8c2d201e2acf85487d861b01"),
+        ("100644", "blob", "e1e38111f11e73fd56198bd21e68c320ed5e6c1f"),
+    ),
+}
+PINNED_PAYROLL_B3_SOURCE_DRILLDOWN_CONTROL_TRANSITIONS = {
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "9c06d55aa8cce39a5bac298e208e330b564752a0"),
+        ("100644", "blob", "dded15b17456503d40ed609a02036d21c2bb3fb1"),
+    ),
+    "scripts/deploy-backend-frontend-static.sh": (
+        ("100644", "blob", "5c6817665ed341fd855343ed5e1856bd1407bc32"),
+        ("100644", "blob", "ebb3670decb56dcb16e184370f217884a2e1d602"),
+    ),
+    "tests/test_backend_frontend_static_release.py": (
+        ("100644", "blob", "aadf321dd68e072b9ec82ba8a92fec970fbddfad"),
+        ("100644", "blob", "ad8b58a045968e0aa958823cba4039ac48bd0daf"),
+    ),
+}
 # PR #176 introduces the V97 payroll-settlement workflow. The migration-aware
 # launcher consumes these exact support/control transitions; the ordinary
 # backend/static launcher continues to reject migration paths and V96->V97.
@@ -480,6 +504,13 @@ def _validate_support_transition(repository, before, target, path):
             f"payroll period control support exception requires the reviewed baseline and target: {path}",
         ),
         (
+            "payroll B3 source drilldown",
+            PINNED_PAYROLL_B3_SOURCE_DRILLDOWN_SUPPORT_TRANSITIONS,
+            PAYROLL_B3_SOURCE_DRILLDOWN_BASELINE,
+            PAYROLL_B3_SOURCE_DRILLDOWN_TARGET,
+            f"payroll B3 source-drilldown support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
             "payroll settlement",
             PINNED_PAYROLL_SETTLEMENT_SUPPORT_TRANSITIONS,
             PAYROLL_SETTLEMENT_BASELINE,
@@ -611,6 +642,22 @@ def _validate_payroll_period_control_transition(repository, before, target, path
         raise RuntimeError(f"payroll period-control release-control mode/blob transition mismatch: {path}")
 
 
+def _validate_payroll_b3_source_drilldown_control_transition(repository, before, target, path):
+    if (before, target) != (
+        PAYROLL_B3_SOURCE_DRILLDOWN_BASELINE,
+        PAYROLL_B3_SOURCE_DRILLDOWN_TARGET,
+    ):
+        raise RuntimeError(
+            f"payroll B3 source-drilldown release-control transition requires the reviewed baseline and target: {path}"
+        )
+    expected_before, expected_target = PINNED_PAYROLL_B3_SOURCE_DRILLDOWN_CONTROL_TRANSITIONS[path]
+    if (
+        _tree_entry(repository, before, path) != expected_before
+        or _tree_entry(repository, target, path) != expected_target
+    ):
+        raise RuntimeError(f"payroll B3 source-drilldown release-control mode/blob transition mismatch: {path}")
+
+
 def _validate_payroll_settlement_control_transition(repository, before, target, path):
     if (before, target) != (PAYROLL_SETTLEMENT_BASELINE, PAYROLL_SETTLEMENT_TARGET):
         raise RuntimeError(
@@ -663,6 +710,15 @@ def _validate_paths(repository, before, target, changed):
             _validate_payroll_period_control_transition(repository, before, target, normalized)
             continue
         if (
+            normalized in PINNED_PAYROLL_B3_SOURCE_DRILLDOWN_CONTROL_TRANSITIONS
+            and (before, target)
+            == (PAYROLL_B3_SOURCE_DRILLDOWN_BASELINE, PAYROLL_B3_SOURCE_DRILLDOWN_TARGET)
+        ):
+            _validate_payroll_b3_source_drilldown_control_transition(
+                repository, before, target, normalized
+            )
+            continue
+        if (
             normalized in PINNED_PAYROLL_SETTLEMENT_CONTROL_TRANSITIONS
             and (before, target) == (PAYROLL_SETTLEMENT_BASELINE, PAYROLL_SETTLEMENT_TARGET)
         ):
@@ -679,6 +735,7 @@ def _validate_paths(repository, before, target, changed):
             or normalized in PINNED_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_PERIOD_CONTROL_TRANSITIONS
+            or normalized in PINNED_PAYROLL_B3_SOURCE_DRILLDOWN_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_SETTLEMENT_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_RISK_CLOSURE_TRANSITIONS
             or normalized in PINNED_ORDERS_SUPPORT_TRANSITIONS
