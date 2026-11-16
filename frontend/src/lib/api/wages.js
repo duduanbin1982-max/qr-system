@@ -5,6 +5,7 @@ export const wagesApi = {
   getPayrollPeriodControl: (payrollMonth) => request('GET', '/api/payroll/periods/' + encodeURIComponent(payrollMonth) + '/control'),
   createPayrollBatch: (data) => request('POST', '/api/payroll/batches', data),
   getPayrollBatch: (id) => request('GET', '/api/payroll/batches/' + id),
+  getPayrollLineSources: (batchId, lineId, params) => request('GET', `/api/payroll/batches/${batchId}/lines/${lineId}/sources` + buildQuery(params)),
   regeneratePayrollBatch: (id, rowVersion) => request('POST', `/api/payroll/batches/${id}/regenerate`, { row_version: rowVersion }),
   submitPayrollBatch: (id, rowVersion) => request('POST', `/api/payroll/batches/${id}/submit`, { row_version: rowVersion }),
   lockPayrollBatch: (id, rowVersion) => request('POST', `/api/payroll/batches/${id}/lock`, { row_version: rowVersion }),

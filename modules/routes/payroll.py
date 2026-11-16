@@ -8,6 +8,7 @@ from flask import g, jsonify, request, send_file
 from modules.csv_utils import safe_csv_cell
 from modules.middleware.auth import has_permission
 from modules.middleware.validate import validate_json
+from modules.middleware.helpers import parse_pagination
 from modules.route_decorators import app, check_auth, safe_audit_log
 from modules.services.payroll_service import PayrollAuditService, PayrollWorkflowService
 from modules.services.payroll_read_service import PayrollReadService
@@ -140,6 +141,30 @@ def payroll_batch_lines(batch_id):
         else:
             result = PayrollReadService.confirmed_employee_detail(batch_id, employee_id)
         return jsonify(result)
+    except ValueError as exc:
+        return _json_error(exc)
+
+
+@app.route("/api/payroll/batches/<int:batch_id>/lines/<int:employee_line_id>/sources", methods=["GET"])
+@check_auth
+def payroll_line_sources(batch_id, employee_line_id):
+    can_view_all = _allowed("wages:view_all", "wages:prepare", "wages:approve")
+    if not can_view_all and not _allowed("wages:view_self"):
+        return _deny()
+    try:
+        employee_id = PayrollReadService.employee_scope(
+            _actor().get("id"),
+            request.args.get("employee_id"),
+            can_view_all=can_view_all,
+        )
+        pagination = parse_pagination(max_limit=200)
+        return _no_store_json(PayrollWorkflowService.line_sources(
+            batch_id,
+            employee_line_id,
+            employee_id=employee_id,
+            page=pagination["page"],
+            limit=pagination["limit"],
+        ))
     except ValueError as exc:
         return _json_error(exc)
 

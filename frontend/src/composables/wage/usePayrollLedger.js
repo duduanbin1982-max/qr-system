@@ -24,6 +24,14 @@ export function usePayrollLedger() {
 
   const detail = ref(null)
 
+  const sourceDetail = ref(null)
+
+  const sourceLoading = ref(false)
+
+  const sourceLine = ref(null)
+
+  let sourceRequestToken = 0
+
   const periodControl = ref(null)
 
   const controlLoading = ref(false)
@@ -175,8 +183,41 @@ export function usePayrollLedger() {
 
   async function openBatch(batch) {
     selectedId.value = batch.id
+    sourceRequestToken += 1
+    sourceDetail.value = null
+    sourceLine.value = null
+    sourceLoading.value = false
     try { detail.value = await api.domains.wages.getPayrollBatch(batch.id) }
     catch (error) { showToast(error.message || '批次明细加载失败', 'error') }
+  }
+
+  async function openLineSources(line, page = 1) {
+    if (!detail.value?.batch?.id) return
+    const batchId = detail.value.batch.id
+    const requestToken = ++sourceRequestToken
+    sourceLine.value = line
+    sourceDetail.value = null
+    sourceLoading.value = true
+    try {
+      const result = await api.domains.wages.getPayrollLineSources(
+        batchId,
+        line.id,
+        { page, limit: 50 },
+      )
+      if (requestToken === sourceRequestToken && detail.value?.batch?.id === batchId) {
+        sourceDetail.value = result
+      }
+    } catch (error) {
+      if (requestToken === sourceRequestToken) showToast(error.message || '工资来源加载失败', 'error')
+    }
+    finally {
+      if (requestToken === sourceRequestToken) sourceLoading.value = false
+    }
+  }
+
+  function changeSourcePage(page) {
+    if (!sourceLine.value || page < 1) return
+    return openLineSources(sourceLine.value, page)
   }
 
   function exportBatch(batch) { window.open(`/api/payroll/batches/${batch.id}/export`, '_blank', 'noopener') }
@@ -192,6 +233,9 @@ export function usePayrollLedger() {
     working,
     selectedId,
     detail,
+    sourceDetail,
+    sourceLoading,
+    sourceLine,
     periodControl,
     controlLoading,
     canPrepare,
@@ -222,6 +266,8 @@ export function usePayrollLedger() {
     confirmBatch,
     revise,
     openBatch,
+    openLineSources,
+    changeSourcePage,
     exportBatch
   }
 }
