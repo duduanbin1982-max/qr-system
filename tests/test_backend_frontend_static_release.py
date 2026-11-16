@@ -297,6 +297,101 @@ def test_reviewed_payroll_period_control_release_control_transition_is_exact():
         )
 
 
+def test_reviewed_payroll_b3_source_drilldown_support_is_exact():
+    repository = Path(__file__).resolve().parents[1]
+    for path, (expected_before, expected_target) in (
+        release.PINNED_PAYROLL_B3_SOURCE_DRILLDOWN_SUPPORT_TRANSITIONS.items()
+    ):
+        assert release._tree_entry(
+            repository, release.PAYROLL_B3_SOURCE_DRILLDOWN_BASELINE, path
+        ) == expected_before
+        assert release._tree_entry(
+            repository, release.PAYROLL_B3_SOURCE_DRILLDOWN_TARGET, path
+        ) == expected_target
+        release._validate_paths(
+            repository,
+            release.PAYROLL_B3_SOURCE_DRILLDOWN_BASELINE,
+            release.PAYROLL_B3_SOURCE_DRILLDOWN_TARGET,
+            [path],
+        )
+
+    changed = release._git(
+        repository,
+        "diff",
+        "--name-only",
+        release.PAYROLL_B3_SOURCE_DRILLDOWN_BASELINE,
+        release.PAYROLL_B3_SOURCE_DRILLDOWN_TARGET,
+    ).splitlines()
+    release._validate_paths(
+        repository,
+        release.PAYROLL_B3_SOURCE_DRILLDOWN_BASELINE,
+        release.PAYROLL_B3_SOURCE_DRILLDOWN_TARGET,
+        changed,
+    )
+
+    with pytest.raises(RuntimeError, match="reviewed baseline and target"):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_B3_SOURCE_DRILLDOWN_BASELINE,
+            release.PAYROLL_PERIOD_CONTROL_TARGET,
+            ["frontend/tests/unit/payroll-period-control.spec.js"],
+        )
+    with pytest.raises(RuntimeError, match="frontend release permits source files only"):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_B3_SOURCE_DRILLDOWN_BASELINE,
+            release.PAYROLL_B3_SOURCE_DRILLDOWN_TARGET,
+            ["frontend/tests/unit/unreviewed-payroll.spec.js"],
+        )
+
+
+def test_reviewed_payroll_b3_source_drilldown_control_transitions_are_exact(monkeypatch):
+    repository = Path(__file__).resolve().parents[1]
+    for path, (expected_before, expected_target) in (
+        release.PINNED_PAYROLL_B3_SOURCE_DRILLDOWN_CONTROL_TRANSITIONS.items()
+    ):
+        assert release._tree_entry(
+            repository, release.PAYROLL_B3_SOURCE_DRILLDOWN_BASELINE, path
+        ) == expected_before
+        assert release._tree_entry(
+            repository, release.PAYROLL_B3_SOURCE_DRILLDOWN_TARGET, path
+        ) == expected_target
+        release._validate_paths(
+            repository,
+            release.PAYROLL_B3_SOURCE_DRILLDOWN_BASELINE,
+            release.PAYROLL_B3_SOURCE_DRILLDOWN_TARGET,
+            [path],
+        )
+        with pytest.raises(RuntimeError):
+            release._validate_paths(
+                repository,
+                release.PAYROLL_B3_SOURCE_DRILLDOWN_BASELINE,
+                release.PAYROLL_PERIOD_CONTROL_TARGET,
+                [path],
+            )
+
+        monkeypatch.setitem(
+            release.PINNED_PAYROLL_B3_SOURCE_DRILLDOWN_CONTROL_TRANSITIONS,
+            path,
+            (expected_before, ("100644", "blob", "0" * 40)),
+        )
+        with pytest.raises(RuntimeError, match="mode/blob transition mismatch"):
+            release._validate_paths(
+                repository,
+                release.PAYROLL_B3_SOURCE_DRILLDOWN_BASELINE,
+                release.PAYROLL_B3_SOURCE_DRILLDOWN_TARGET,
+                [path],
+            )
+
+    with pytest.raises(RuntimeError, match="backend/frontend scope"):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_B3_SOURCE_DRILLDOWN_BASELINE,
+            release.PAYROLL_B3_SOURCE_DRILLDOWN_TARGET,
+            ["scripts/deploy-code-only.sh"],
+        )
+
+
 def test_reviewed_payroll_risk_closure_support_matches_exact_business_merge():
     repository = Path(__file__).resolve().parents[1]
     for path, (expected_before, expected_target) in (
