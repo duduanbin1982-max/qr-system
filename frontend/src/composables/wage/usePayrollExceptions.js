@@ -165,7 +165,10 @@ export function usePayrollExceptions() {
         }),
       ])
       items.value=data.exceptions||[]
-      selectedIds.value = selectedIds.value.filter(id => items.value.some(item => item.id === id && item.status === 'proposed'))
+      // Default to every pending proposal; operators can uncheck individual rows.
+      selectedIds.value = items.value
+        .filter(item => item.status === 'proposed')
+        .map(item => item.id)
       auditFindings.value=auditData.audit_findings||[]
       auditResolutions.value={}
       auditResolutionCodes.value=Object.fromEntries(

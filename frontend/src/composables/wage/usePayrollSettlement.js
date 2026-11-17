@@ -145,6 +145,14 @@ export function usePayrollSettlement() {
     reconciled: '下一步：确认金额后结账锁定',
     closed: '流程已完成，当前批次已锁定',
   }[settlement.value?.status] || '选择批次开始结算'))
+  const nextActionKind = computed(() => ({
+    not_exported: 'create_export',
+    exported: 'upload_receipt',
+    receipting: 'reconcile',
+    difference_pending: 'reconcile',
+    reconciled: 'close',
+    closed: 'done',
+  }[settlement.value?.status] || 'select_batch'))
 
   function money(cents) {
     return `¥${(Number(cents || 0) / 100).toFixed(2)}`
@@ -428,6 +436,7 @@ export function usePayrollSettlement() {
     workflowSteps,
     workflowStepIndex,
     nextActionLabel,
+    nextActionKind,
     loading,
     detailLoading,
     working,

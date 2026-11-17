@@ -1,4 +1,4 @@
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '@/lib/api.js'
 import { can } from '@/lib/auth.js'
 import { showToast } from '@/lib/store.js'
@@ -38,6 +38,7 @@ export function usePayrollLedger() {
 
   let sourceRequestToken = 0
   let detailRequestToken = 0
+  let detailSearchTimer = null
 
   const periodControl = ref(null)
 
@@ -308,6 +309,15 @@ export function usePayrollLedger() {
     return reloadDetail()
   }
 
+  function scheduleDetailSearch() {
+    detailPage.value = 1
+    if (detailSearchTimer) clearTimeout(detailSearchTimer)
+    detailSearchTimer = setTimeout(() => {
+      detailSearchTimer = null
+      reloadDetail()
+    }, 300)
+  }
+
   function runPrimaryAction(batch) {
     const action = primaryAction(batch)
     if (action.disabled) {
@@ -326,6 +336,10 @@ export function usePayrollLedger() {
   function exportBatch(batch) { window.open(`/api/payroll/batches/${batch.id}/export`, '_blank', 'noopener') }
 
   onMounted(load)
+
+  onBeforeUnmount(() => {
+    if (detailSearchTimer) clearTimeout(detailSearchTimer)
+  })
 
   return {
     now,
@@ -382,6 +396,7 @@ export function usePayrollLedger() {
     changeSourcePage,
     changeDetailPage,
     resetDetailPage,
+    scheduleDetailSearch,
     runPrimaryAction,
     exportBatch
   }

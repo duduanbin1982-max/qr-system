@@ -3,7 +3,11 @@ import { api } from '@/lib/api.js'
 import { showToast } from '@/lib/store.js'
 import { can } from '@/lib/auth.js'
 import { formatLocalMonth } from '@/composables/wage/payrollFormat.js'
-import { getVisibleWageTabs, resolveWageTab } from '@/composables/wage/wageTabs.js'
+import {
+  getVisibleWageTabs,
+  getWageTabGroups,
+  resolveWageTab,
+} from '@/composables/wage/wageTabs.js'
 import {
   buildMonthlyCsvRows, buildPayslipHtml, buildPieceworkCsvRows,
 } from '@/composables/wage/wageExport.js'
@@ -16,20 +20,7 @@ let _instance = null
 export function useWage() {
   if (_instance) return _instance
     const tabs = computed(() => getVisibleWageTabs(can))
-    const tabGroups = computed(() => {
-      const groups = []
-      const byGroup = new Map()
-      for (const tab of tabs.value) {
-        const group = tab.group || '其他'
-        if (!byGroup.has(group)) {
-          const item = { id: group, label: group, tabs: [] }
-          byGroup.set(group, item)
-          groups.push(item)
-        }
-        byGroup.get(group).tabs.push(tab)
-      }
-      return groups
-    })
+    const tabGroups = computed(() => getWageTabGroups(tabs.value))
     const preferredTab = localStorage.getItem('wageActiveTab')
     const activeTab = ref(resolveWageTab('', preferredTab, tabs.value))
     let mounted = false

@@ -48,9 +48,11 @@ describe('payroll UI/UX workflow controls', () => {
     await flushPromises()
 
     const checkboxes = wrapper.findAll('input[type="checkbox"]')
-    await checkboxes[1].setValue(true)
-    await checkboxes[2].setValue(true)
-    const bulkButton = wrapper.findAll('button').find(button => button.text() === '集中批准')
+    expect(checkboxes[1].element.checked).toBe(true)
+    expect(checkboxes[2].element.checked).toBe(true)
+    const bulkButton = wrapper.findAll('button').find(button => button.text().includes('集中批准'))
+    expect(bulkButton).toBeTruthy()
+    expect(bulkButton.text()).toContain('2')
     await bulkButton.trigger('click')
     await flushPromises()
 
@@ -68,7 +70,8 @@ describe('payroll UI/UX workflow controls', () => {
     const wrapper = mount(PayrollLedgerTab)
     await flushPromises()
     expect(wrapper.text()).toContain('重算')
-    expect(wrapper.text()).toContain('更多')
+    expect(wrapper.text()).toContain('查看')
+    expect(wrapper.get('[data-testid="batch-primary-action-1"]').text()).toBe('重算')
     wrapper.unmount()
 
     mocks.permissions = ['wages:view_all']
