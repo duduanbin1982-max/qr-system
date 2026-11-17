@@ -2,10 +2,11 @@ import { computed, onMounted, ref } from 'vue'
 import { api } from '@/lib/api.js'
 import { can } from '@/lib/auth.js'
 import { showToast } from '@/lib/store.js'
-import { navigate } from '@/lib/router.js'
+import { useWage } from '@/composables/useWage.js'
 
 export function usePayrollLedger() {
   const now = new Date()
+  const { switchTab } = useWage()
 
   const month = ref(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
 
@@ -317,8 +318,8 @@ export function usePayrollLedger() {
     if (action.key === 'regenerate') return regenerate(batch)
     if (action.key === 'lock') return lock(batch)
     if (action.key === 'confirm') return confirmBatch(batch)
-    if (action.key === 'exceptions' && typeof navigate === 'function') return navigate('wages', { wage_tab: 'exceptions' })
-    if (action.key === 'settlement' && typeof navigate === 'function') return navigate('wages', { wage_tab: 'settlement' })
+    if (action.key === 'exceptions') return switchTab('exceptions')
+    if (action.key === 'settlement') return switchTab('settlement')
     return openBatch(batch)
   }
 

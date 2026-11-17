@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   wages: {},
   toast: vi.fn(),
   navigate: vi.fn(),
+  switchTab: vi.fn(),
 }))
 
 vi.mock('@/lib/api.js', () => ({ api: { domains: { wages: mocks.wages } } }))
@@ -15,6 +16,7 @@ vi.mock('@/lib/auth.js', () => ({
 }))
 vi.mock('@/lib/store.js', () => ({ showToast: mocks.toast }))
 vi.mock('@/lib/router.js', () => ({ navigate: mocks.navigate, router: { params: {} } }))
+vi.mock('@/composables/useWage.js', () => ({ useWage: () => ({ switchTab: mocks.switchTab }) }))
 
 import PayrollExceptionsTab from '@/views/wage/PayrollExceptionsTab.vue'
 import PayrollLedgerTab from '@/views/wage/PayrollLedgerTab.vue'
@@ -75,5 +77,34 @@ describe('payroll UI/UX workflow controls', () => {
     expect(readOnly.text()).toContain('查看')
     expect(readOnly.findAll('button').some(button => button.text() === '重算')).toBe(false)
     readOnly.unmount()
+  })
+
+  it('switches to the exceptions tab from the primary action', async () => {
+    mocks.wages.listPayrollBatches.mockResolvedValue({
+      batches: [{ id: 2, payroll_month: '2026-11', version: 1, status: 'exceptions_pending' }],
+    })
+    const wrapper = mount(PayrollLedgerTab)
+    await flushPromises()
+
+    await wrapper.find('.payroll-row-actions button.btn-primary').trigger('click')
+
+    expect(mocks.switchTab).toHaveBeenCalledWith('exceptions')
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('switches to the settlement tab from the primary action', async () => {
+    mocks.permissions = ['wages:view_all', 'wages:export']
+    mocks.wages.listPayrollBatches.mockResolvedValue({
+      batches: [{ id: 3, payroll_month: '2026-11', version: 1, status: 'confirmed' }],
+    })
+    const wrapper = mount(PayrollLedgerTab)
+    await flushPromises()
+
+    await wrapper.find('.payroll-row-actions button.btn-primary').trigger('click')
+
+    expect(mocks.switchTab).toHaveBeenCalledWith('settlement')
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 })
