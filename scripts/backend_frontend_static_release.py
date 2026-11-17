@@ -320,6 +320,27 @@ PINNED_PAYROLL_B3_SOURCE_DRILLDOWN_CONTROL_TRANSITIONS = {
         ("100644", "blob", "ad8b58a045968e0aa958823cba4039ac48bd0daf"),
     ),
 }
+# PR #187 pins the payroll source-snapshot business merge. Admit only the
+# reviewed period-control test and the cumulative release-control transition
+# for this exact production-to-merge pair.
+PAYROLL_SOURCE_SNAPSHOT_BASELINE = "bbbfdea6fa50ba296cb122cfcd4bffa85ad5e118"
+PAYROLL_SOURCE_SNAPSHOT_TARGET = "96f8d3baf4e170ae5c0fce95f280ba077b956101"
+PINNED_PAYROLL_SOURCE_SNAPSHOT_SUPPORT_TRANSITIONS = {
+    "frontend/tests/unit/payroll-period-control.spec.js": (
+        ("100644", "blob", "e1e38111f11e73fd56198bd21e68c320ed5e6c1f"),
+        ("100644", "blob", "5056f2aa6313f5e3ded81b7a6ee1a2898495c62d"),
+    ),
+    "tests/test_backend_frontend_static_release.py": (
+        ("100644", "blob", "ad8b58a045968e0aa958823cba4039ac48bd0daf"),
+        ("100644", "blob", "180060b23bab8ac6f06fb19e72bde479346712ad"),
+    ),
+}
+PINNED_PAYROLL_SOURCE_SNAPSHOT_CONTROL_TRANSITIONS = {
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "dded15b17456503d40ed609a02036d21c2bb3fb1"),
+        ("100644", "blob", "a949c6f14d1f2850b19aa2f31bbdd81120dca8c0"),
+    ),
+}
 # PR #176 introduces the V97 payroll-settlement workflow. The migration-aware
 # launcher consumes these exact support/control transitions; the ordinary
 # backend/static launcher continues to reject migration paths and V96->V97.
@@ -511,6 +532,13 @@ def _validate_support_transition(repository, before, target, path):
             f"payroll B3 source-drilldown support exception requires the reviewed baseline and target: {path}",
         ),
         (
+            "payroll source snapshot",
+            PINNED_PAYROLL_SOURCE_SNAPSHOT_SUPPORT_TRANSITIONS,
+            PAYROLL_SOURCE_SNAPSHOT_BASELINE,
+            PAYROLL_SOURCE_SNAPSHOT_TARGET,
+            f"payroll source-snapshot support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
             "payroll settlement",
             PINNED_PAYROLL_SETTLEMENT_SUPPORT_TRANSITIONS,
             PAYROLL_SETTLEMENT_BASELINE,
@@ -658,6 +686,22 @@ def _validate_payroll_b3_source_drilldown_control_transition(repository, before,
         raise RuntimeError(f"payroll B3 source-drilldown release-control mode/blob transition mismatch: {path}")
 
 
+def _validate_payroll_source_snapshot_control_transition(repository, before, target, path):
+    if (before, target) != (
+        PAYROLL_SOURCE_SNAPSHOT_BASELINE,
+        PAYROLL_SOURCE_SNAPSHOT_TARGET,
+    ):
+        raise RuntimeError(
+            f"payroll source-snapshot release-control transition requires the reviewed baseline and target: {path}"
+        )
+    expected_before, expected_target = PINNED_PAYROLL_SOURCE_SNAPSHOT_CONTROL_TRANSITIONS[path]
+    if (
+        _tree_entry(repository, before, path) != expected_before
+        or _tree_entry(repository, target, path) != expected_target
+    ):
+        raise RuntimeError(f"payroll source-snapshot release-control mode/blob transition mismatch: {path}")
+
+
 def _validate_payroll_settlement_control_transition(repository, before, target, path):
     if (before, target) != (PAYROLL_SETTLEMENT_BASELINE, PAYROLL_SETTLEMENT_TARGET):
         raise RuntimeError(
@@ -715,6 +759,15 @@ def _validate_paths(repository, before, target, changed):
             == (PAYROLL_B3_SOURCE_DRILLDOWN_BASELINE, PAYROLL_B3_SOURCE_DRILLDOWN_TARGET)
         ):
             _validate_payroll_b3_source_drilldown_control_transition(
+                repository, before, target, normalized
+            )
+            continue
+        if (
+            normalized in PINNED_PAYROLL_SOURCE_SNAPSHOT_CONTROL_TRANSITIONS
+            and (before, target)
+            == (PAYROLL_SOURCE_SNAPSHOT_BASELINE, PAYROLL_SOURCE_SNAPSHOT_TARGET)
+        ):
+            _validate_payroll_source_snapshot_control_transition(
                 repository, before, target, normalized
             )
             continue

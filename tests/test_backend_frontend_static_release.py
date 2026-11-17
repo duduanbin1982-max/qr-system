@@ -1575,3 +1575,85 @@ def test_real_static_launcher_reused_key_does_not_overwrite_evidence(tmp_path):
     assert evidence.read_text() == "prior evidence\n"
     assert deployment_manifest.code_only_state(fixture.database, fixture.production) == fixture.baseline
     assert (fixture.state / "service").read_text() == "active"
+
+
+def test_reviewed_payroll_source_snapshot_support_is_exact():
+    repository = Path(__file__).resolve().parents[1]
+    for path, (expected_before, expected_target) in (
+        release.PINNED_PAYROLL_SOURCE_SNAPSHOT_SUPPORT_TRANSITIONS.items()
+    ):
+        assert release._tree_entry(
+            repository, release.PAYROLL_SOURCE_SNAPSHOT_BASELINE, path
+        ) == expected_before
+        assert release._tree_entry(
+            repository, release.PAYROLL_SOURCE_SNAPSHOT_TARGET, path
+        ) == expected_target
+        release._validate_paths(
+            repository,
+            release.PAYROLL_SOURCE_SNAPSHOT_BASELINE,
+            release.PAYROLL_SOURCE_SNAPSHOT_TARGET,
+            [path],
+        )
+
+    changed = release._git(
+        repository,
+        "diff",
+        "--name-only",
+        release.PAYROLL_SOURCE_SNAPSHOT_BASELINE,
+        release.PAYROLL_SOURCE_SNAPSHOT_TARGET,
+    ).splitlines()
+    release._validate_paths(
+        repository,
+        release.PAYROLL_SOURCE_SNAPSHOT_BASELINE,
+        release.PAYROLL_SOURCE_SNAPSHOT_TARGET,
+        changed,
+    )
+
+    with pytest.raises(RuntimeError, match="reviewed baseline and target"):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_SOURCE_SNAPSHOT_BASELINE,
+            release.PAYROLL_B3_SOURCE_DRILLDOWN_TARGET,
+            ["frontend/tests/unit/payroll-period-control.spec.js"],
+        )
+    with pytest.raises(RuntimeError):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_SOURCE_SNAPSHOT_BASELINE,
+            release.PAYROLL_SOURCE_SNAPSHOT_TARGET,
+            ["frontend/tests/unit/unreviewed-payroll.spec.js"],
+        )
+
+
+def test_reviewed_payroll_source_snapshot_control_transition_is_exact(monkeypatch):
+    repository = Path(__file__).resolve().parents[1]
+    path = "scripts/backend_frontend_static_release.py"
+    expected_before, expected_target = release.PINNED_PAYROLL_SOURCE_SNAPSHOT_CONTROL_TRANSITIONS[path]
+    assert release._tree_entry(repository, release.PAYROLL_SOURCE_SNAPSHOT_BASELINE, path) == expected_before
+    assert release._tree_entry(repository, release.PAYROLL_SOURCE_SNAPSHOT_TARGET, path) == expected_target
+    release._validate_paths(
+        repository,
+        release.PAYROLL_SOURCE_SNAPSHOT_BASELINE,
+        release.PAYROLL_SOURCE_SNAPSHOT_TARGET,
+        [path],
+    )
+    with pytest.raises(RuntimeError):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_SOURCE_SNAPSHOT_BASELINE,
+            release.PAYROLL_B3_SOURCE_DRILLDOWN_TARGET,
+            [path],
+        )
+
+    monkeypatch.setitem(
+        release.PINNED_PAYROLL_SOURCE_SNAPSHOT_CONTROL_TRANSITIONS,
+        path,
+        (expected_before, ("100644", "blob", "0" * 40)),
+    )
+    with pytest.raises(RuntimeError, match="mode/blob transition mismatch"):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_SOURCE_SNAPSHOT_BASELINE,
+            release.PAYROLL_SOURCE_SNAPSHOT_TARGET,
+            [path],
+        )
