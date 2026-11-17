@@ -366,6 +366,39 @@ PINNED_PAYROLL_UI_UX_CONTROL_TRANSITIONS = {
         ("100644", "blob", "3f62605467a3b2a24afbc56352a352d0163bb020"),
     ),
 }
+# PR #191 repairs the interaction gaps in the payroll UI/UX workflow. Admit
+# only the reviewed test support and cumulative release-control objects for
+# this exact production-to-business-merge pair.
+PAYROLL_UI_UX_REPAIR_BASELINE = "8da168bde3bd2d51bff5594f7b40aa17f71809f9"
+PAYROLL_UI_UX_REPAIR_TARGET = "e0ea44d5211bb18205566925e8ce88467b2b3e5c"
+PINNED_PAYROLL_UI_UX_REPAIR_SUPPORT_TRANSITIONS = {
+    "frontend/tests/unit/payroll-period-control.spec.js": (
+        ("100644", "blob", "2d5161850c0968536b71d959dbf829772998a600"),
+        ("100644", "blob", "c01e64684d2d0bb25e628be84a5c6e8100c8a672"),
+    ),
+    "frontend/tests/unit/payroll-settlement.spec.js": (
+        ("100644", "blob", "3bcda04bc938b1cbf0350d937fc2251f8e337354"),
+        ("100644", "blob", "b7c4037a68b1db91d71d0824ba9f775768ead54d"),
+    ),
+    "frontend/tests/unit/payroll-ui-ux.spec.js": (
+        ("100644", "blob", "16ec5c3f934a745c2100ec5c8dec5373053737bb"),
+        ("100644", "blob", "9f48ecd6976f448d1e93b1538d44eb54dc3c2fd4"),
+    ),
+    "frontend/tests/unit/wageTabs.spec.js": (
+        ("100644", "blob", "938703f1a423acebea046b41dc78f334c822a344"),
+        ("100644", "blob", "40a3b15bb9c41420702049a0c8755f61d9d5ba5f"),
+    ),
+    "tests/test_backend_frontend_static_release.py": (
+        ("100644", "blob", "04860893487e13b4116426947ce6f65a054f676f"),
+        ("100644", "blob", "86084f9ce72bed8396f5cabfeedb31708c79093c"),
+    ),
+}
+PINNED_PAYROLL_UI_UX_REPAIR_CONTROL_TRANSITIONS = {
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "3f62605467a3b2a24afbc56352a352d0163bb020"),
+        ("100644", "blob", "cc9a9b5f5d6fec5849b2cd5fa09d20c0125dd47a"),
+    ),
+}
 # PR #176 introduces the V97 payroll-settlement workflow. The migration-aware
 # launcher consumes these exact support/control transitions; the ordinary
 # backend/static launcher continues to reject migration paths and V96->V97.
@@ -571,6 +604,13 @@ def _validate_support_transition(repository, before, target, path):
             f"payroll UI/UX support exception requires the reviewed baseline and target: {path}",
         ),
         (
+            "payroll UI/UX repair",
+            PINNED_PAYROLL_UI_UX_REPAIR_SUPPORT_TRANSITIONS,
+            PAYROLL_UI_UX_REPAIR_BASELINE,
+            PAYROLL_UI_UX_REPAIR_TARGET,
+            f"payroll UI/UX repair support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
             "payroll settlement",
             PINNED_PAYROLL_SETTLEMENT_SUPPORT_TRANSITIONS,
             PAYROLL_SETTLEMENT_BASELINE,
@@ -747,6 +787,22 @@ def _validate_payroll_ui_ux_control_transition(repository, before, target, path)
         raise RuntimeError(f"payroll UI/UX release-control mode/blob transition mismatch: {path}")
 
 
+def _validate_payroll_ui_ux_repair_control_transition(repository, before, target, path):
+    if (before, target) != (
+        PAYROLL_UI_UX_REPAIR_BASELINE,
+        PAYROLL_UI_UX_REPAIR_TARGET,
+    ):
+        raise RuntimeError(
+            f"payroll UI/UX repair release-control transition requires the reviewed baseline and target: {path}"
+        )
+    expected_before, expected_target = PINNED_PAYROLL_UI_UX_REPAIR_CONTROL_TRANSITIONS[path]
+    if (
+        _tree_entry(repository, before, path) != expected_before
+        or _tree_entry(repository, target, path) != expected_target
+    ):
+        raise RuntimeError(f"payroll UI/UX repair release-control mode/blob transition mismatch: {path}")
+
+
 def _validate_payroll_settlement_control_transition(repository, before, target, path):
     if (before, target) != (PAYROLL_SETTLEMENT_BASELINE, PAYROLL_SETTLEMENT_TARGET):
         raise RuntimeError(
@@ -823,6 +879,14 @@ def _validate_paths(repository, before, target, changed):
             _validate_payroll_ui_ux_control_transition(repository, before, target, normalized)
             continue
         if (
+            normalized in PINNED_PAYROLL_UI_UX_REPAIR_CONTROL_TRANSITIONS
+            and (before, target) == (PAYROLL_UI_UX_REPAIR_BASELINE, PAYROLL_UI_UX_REPAIR_TARGET)
+        ):
+            _validate_payroll_ui_ux_repair_control_transition(
+                repository, before, target, normalized
+            )
+            continue
+        if (
             normalized in PINNED_PAYROLL_SETTLEMENT_CONTROL_TRANSITIONS
             and (before, target) == (PAYROLL_SETTLEMENT_BASELINE, PAYROLL_SETTLEMENT_TARGET)
         ):
@@ -841,6 +905,7 @@ def _validate_paths(repository, before, target, changed):
             or normalized in PINNED_PAYROLL_PERIOD_CONTROL_TRANSITIONS
             or normalized in PINNED_PAYROLL_B3_SOURCE_DRILLDOWN_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_UI_UX_SUPPORT_TRANSITIONS
+            or normalized in PINNED_PAYROLL_UI_UX_REPAIR_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_SETTLEMENT_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_RISK_CLOSURE_TRANSITIONS
             or normalized in PINNED_ORDERS_SUPPORT_TRANSITIONS
