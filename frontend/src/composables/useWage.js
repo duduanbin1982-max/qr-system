@@ -16,6 +16,20 @@ let _instance = null
 export function useWage() {
   if (_instance) return _instance
     const tabs = computed(() => getVisibleWageTabs(can))
+    const tabGroups = computed(() => {
+      const groups = []
+      const byGroup = new Map()
+      for (const tab of tabs.value) {
+        const group = tab.group || '其他'
+        if (!byGroup.has(group)) {
+          const item = { id: group, label: group, tabs: [] }
+          byGroup.set(group, item)
+          groups.push(item)
+        }
+        byGroup.get(group).tabs.push(tab)
+      }
+      return groups
+    })
     const preferredTab = localStorage.getItem('wageActiveTab')
     const activeTab = ref(resolveWageTab('', preferredTab, tabs.value))
     let mounted = false
@@ -326,7 +340,7 @@ export function useWage() {
     if (!_instance) { onBeforeUnmount(() => { if (_refreshTimer) clearInterval(_refreshTimer); _instance = null }) }
 
     _instance = {
-      activeTab, tabs, switchTab,
+      activeTab, tabs, tabGroups, switchTab,
       wages, loading, dateFrom, dateTo, expandedId, includeRework, hideZero, page, limit, total, totalPages, exportingPiecework,
       fmtMoney, fmtDate, load, toggle, filteredWages, grandTotal, grandQty, exportCSV, prevPage, nextPage,
       printPayslip,

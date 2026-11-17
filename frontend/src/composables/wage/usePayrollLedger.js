@@ -2,6 +2,7 @@ import { computed, onMounted, ref } from 'vue'
 import { api } from '@/lib/api.js'
 import { can } from '@/lib/auth.js'
 import { showToast } from '@/lib/store.js'
+import { navigate } from '@/lib/router.js'
 
 export function usePayrollLedger() {
   const now = new Date()
@@ -29,8 +30,13 @@ export function usePayrollLedger() {
   const sourceLoading = ref(false)
 
   const sourceLine = ref(null)
+  const detailPage = ref(1)
+  const detailLimit = ref(50)
+  const detailEmployeeQuery = ref('')
+  const detailStatusFilter = ref('all')
 
   let sourceRequestToken = 0
+  let detailRequestToken = 0
 
   const periodControl = ref(null)
 
@@ -58,6 +64,11 @@ export function usePayrollLedger() {
     .filter(item => item.status === 'confirmed' && !item.superseded_by_batch_id)
     .reduce((sum, item) => sum + Number(item.payable_wage_cents || 0), 0))
 
+  const filteredDetailLines = computed(() => detail.value?.lines || [])
+  const detailTotal = computed(() => Number(detail.value?.lines_total ?? filteredDetailLines.value.length))
+  const detailTotalPages = computed(() => Math.max(1, Math.ceil(detailTotal.value / detailLimit.value)))
+  const pagedDetailLines = computed(() => filteredDetailLines.value)
+
   function money(cents) { return `¥${(Number(cents || 0) / 100).toFixed(2)}` }
 
   function statusLabel(value) { return statusOptions.find(item => item.value === value)?.label || value }
@@ -68,6 +79,18 @@ export function usePayrollLedger() {
 
   function hasFormalSettlement(batch) {
     return Boolean(batch.settlement_status && batch.settlement_status !== 'not_exported')
+  }
+
+  function primaryAction(batch) {
+    if (batch.status === 'draft' && canPrepare.value) {
+      if (canSubmit(batch)) return { key: 'submit', label: '提交', disabled: false }
+      if (editable(batch)) return { key: 'regenerate', label: '重算', disabled: false }
+    }
+    if (batch.status === 'exceptions_pending' && (canPrepare.value || canApprove.value)) return { key: 'exceptions', label: '处理异常', disabled: false }
+    if (batch.status === 'review_pending' && canApprove.value) return { key: 'lock', label: canLock(batch) ? '锁定' : '先处理负数', disabled: !canLock(batch) }
+    if (batch.status === 'locked' && canApprove.value) return { key: 'confirm', label: canConfirm(batch) ? '确认' : '先处理负数', disabled: !canConfirm(batch) }
+    if (batch.status === 'confirmed' && canExport.value) return { key: 'settlement', label: '进入结算', disabled: false }
+    return { key: 'view', label: '查看', disabled: false }
   }
 
   function canSubmit(batch) { return batch.status === 'draft' && !batch.exception_count && !batch.audit_finding_count && !batch.legacy_imported && !batch.input_changed && negativePayableCount(batch) === 0 }
@@ -187,7 +210,14 @@ export function usePayrollLedger() {
     sourceDetail.value = null
     sourceLine.value = null
     sourceLoading.value = false
-    try { detail.value = await api.domains.wages.getPayrollBatch(batch.id) }
+    detailPage.value = 1
+    detailEmployeeQuery.value = ''
+    detailStatusFilter.value = 'all'
+    const requestToken = ++detailRequestToken
+    try {
+      const result = await api.domains.wages.getPayrollBatch(batch.id, detailParams())
+      if (requestToken === detailRequestToken && selectedId.value === batch.id) detail.value = result
+    }
     catch (error) { showToast(error.message || '批次明细加载失败', 'error') }
   }
 
@@ -242,6 +272,56 @@ export function usePayrollLedger() {
     return openLineSources(sourceLine.value, page, calculationVersion)
   }
 
+  function changeDetailPage(page) {
+    const next = Number(page)
+    if (!Number.isInteger(next)) return
+    detailPage.value = Math.min(Math.max(next, 1), detailTotalPages.value)
+    return reloadDetail()
+  }
+
+  function detailParams() {
+    const params = {
+      page: detailPage.value,
+      limit: detailLimit.value,
+      status_filter: detailStatusFilter.value,
+    }
+    const query = detailEmployeeQuery.value.trim()
+    if (query) params.employee_query = query
+    return params
+  }
+
+  async function reloadDetail() {
+    if (!selectedId.value) return
+    const batchId = selectedId.value
+    const requestToken = ++detailRequestToken
+    try {
+      const result = await api.domains.wages.getPayrollBatch(batchId, detailParams())
+      if (requestToken === detailRequestToken && selectedId.value === batchId) detail.value = result
+    } catch (error) {
+      if (requestToken === detailRequestToken) showToast(error.message || '工资明细加载失败', 'error')
+    }
+  }
+
+  function resetDetailPage() {
+    detailPage.value = 1
+    return reloadDetail()
+  }
+
+  function runPrimaryAction(batch) {
+    const action = primaryAction(batch)
+    if (action.disabled) {
+      showToast('当前批次仍有阻断项，请先处理后再继续', 'error')
+      return
+    }
+    if (action.key === 'submit') return submit(batch)
+    if (action.key === 'regenerate') return regenerate(batch)
+    if (action.key === 'lock') return lock(batch)
+    if (action.key === 'confirm') return confirmBatch(batch)
+    if (action.key === 'exceptions' && typeof navigate === 'function') return navigate('wages', { wage_tab: 'exceptions' })
+    if (action.key === 'settlement' && typeof navigate === 'function') return navigate('wages', { wage_tab: 'settlement' })
+    return openBatch(batch)
+  }
+
   function exportBatch(batch) { window.open(`/api/payroll/batches/${batch.id}/export`, '_blank', 'noopener') }
 
   onMounted(load)
@@ -267,6 +347,14 @@ export function usePayrollLedger() {
     pendingExceptions,
     confirmedCount,
     monthTotal,
+    filteredDetailLines,
+    pagedDetailLines,
+    detailPage,
+    detailLimit,
+    detailEmployeeQuery,
+    detailStatusFilter,
+    detailTotalPages,
+    detailTotal,
     money,
     statusLabel,
     periodStatusLabel,
@@ -277,6 +365,7 @@ export function usePayrollLedger() {
     canLock,
     canConfirm,
     canRevise,
+    primaryAction,
     idempotency,
     load,
     loadControl,
@@ -290,6 +379,9 @@ export function usePayrollLedger() {
     openBatch,
     openLineSources,
     changeSourcePage,
+    changeDetailPage,
+    resetDetailPage,
+    runPrimaryAction,
     exportBatch
   }
 }

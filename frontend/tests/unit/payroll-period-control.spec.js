@@ -73,7 +73,9 @@ describe('payroll period control', () => {
     await wrapper.findAll('button').find(button => button.text() === '查看来源').trigger('click')
     await flushPromises()
 
-    expect(mocks.wages.getPayrollBatch).toHaveBeenCalledWith(7)
+    expect(mocks.wages.getPayrollBatch).toHaveBeenCalledWith(7, {
+      page: 1, limit: 50, status_filter: 'all',
+    })
     expect(mocks.wages.getPayrollLineSources).toHaveBeenCalledWith(7, 11, { page: 1, limit: 50 })
     expect(wrapper.text()).toContain('来源下钻')
     expect(wrapper.text()).toContain('正常报工')

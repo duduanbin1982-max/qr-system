@@ -124,6 +124,35 @@ def test_privileged_batch_reader_preserves_full_metadata(client, monkeypatch, pe
     assert result["events"][0]["reason"] == "他人工资调整"
 
 
+def test_privileged_batch_detail_supports_pagination_and_snapshot_filters(client, monkeypatch):
+    with client.application.app_context():
+        db = get_db()
+        own_id, other_id = _employees(db)
+        batch_id = _batch(db, own_id, other_id)
+    headers = _authenticate(monkeypatch, own_id, ["wages:view_all"])
+
+    response = client.get(
+        f"/api/payroll/batches/{batch_id}?page=1&limit=1",
+        headers=headers,
+    )
+    assert response.status_code == 200
+    result = response.get_json()
+    assert len(result["lines"]) == 1
+    assert result["lines_total"] == 2
+    assert result["page"] == 1
+    assert result["limit"] == 1
+    assert result["details"] == []
+
+    filtered = client.get(
+        f"/api/payroll/batches/{batch_id}?page=1&limit=50&employee_query=他人",
+        headers=headers,
+    )
+    assert filtered.status_code == 200
+    filtered_result = filtered.get_json()
+    assert filtered_result["lines_total"] == 1
+    assert [row["employee_name_snapshot"] for row in filtered_result["lines"]] == ["他人"]
+
+
 def test_source_drilldown_is_paginated_and_returns_structured_snapshot(client, monkeypatch):
     with client.application.app_context():
         db = get_db()

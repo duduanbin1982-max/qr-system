@@ -119,7 +119,21 @@ def payroll_batch_detail(batch_id):
     if not _allowed("wages:view_all", "wages:prepare", "wages:approve"):
         return _deny()
     try:
-        return jsonify(PayrollWorkflowService.batch_detail(batch_id))
+        page = request.args.get('page', type=int)
+        limit = request.args.get('limit', type=int)
+        if page is not None or limit is not None:
+            page = max(page or 1, 1)
+            limit = max(1, min(limit or 50, 200))
+        status_filter = request.args.get('status_filter', 'all')
+        if status_filter not in ('all', 'adjusted', 'negative'):
+            raise ValueError('工资明细状态筛选无效')
+        return jsonify(PayrollWorkflowService.batch_detail(
+            batch_id,
+            page=page,
+            limit=limit,
+            employee_query=request.args.get('employee_query', ''),
+            status_filter=status_filter,
+        ))
     except ValueError as exc:
         return _json_error(exc)
 

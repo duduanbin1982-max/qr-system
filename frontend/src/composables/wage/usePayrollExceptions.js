@@ -38,6 +38,8 @@ export function usePayrollExceptions() {
   const editingId = ref(null)
 
   const form = ref({ unitPrice:'', reworkPercent:'', reason:'' })
+  const selectedIds = ref([])
+  const bulkResult = ref(null)
 
   const canPrepare = computed(() => can('wages:prepare'))
 
@@ -163,6 +165,7 @@ export function usePayrollExceptions() {
         }),
       ])
       items.value=data.exceptions||[]
+      selectedIds.value = selectedIds.value.filter(id => items.value.some(item => item.id === id && item.status === 'proposed'))
       auditFindings.value=auditData.audit_findings||[]
       auditResolutions.value={}
       auditResolutionCodes.value=Object.fromEntries(
@@ -202,6 +205,54 @@ export function usePayrollExceptions() {
     try { await api.domains.wages.approvePayrollException(item.id); showToast('异常方案已批准，请返回台账重算'); await load() }
     catch (error) { showToast(error.message || '批准失败','error') }
     finally { working.value=false }
+  }
+
+  const selectableItems = computed(() => items.value.filter(item => item.status === 'proposed'))
+  const allSelectableSelected = computed(() => selectableItems.value.length > 0
+    && selectableItems.value.every(item => selectedIds.value.includes(item.id)))
+
+  function toggleSelected(id) {
+    selectedIds.value = selectedIds.value.includes(id)
+      ? selectedIds.value.filter(itemId => itemId !== id)
+      : [...selectedIds.value, id]
+  }
+
+  function toggleAllSelected() {
+    selectedIds.value = allSelectableSelected.value
+      ? []
+      : selectableItems.value.map(item => item.id)
+  }
+
+  async function bulkApprove() {
+    const targets = selectableItems.value.filter(item => selectedIds.value.includes(item.id))
+    if (!targets.length) {
+      showToast('请先选择待审批异常', 'error')
+      return
+    }
+    if (!window.confirm(`将逐条批准 ${targets.length} 条异常；单条失败不会阻断后续处理，是否继续？`)) return
+    working.value = true
+    const results = []
+    try {
+      for (const item of targets) {
+        try {
+          await api.domains.wages.approvePayrollException(item.id)
+          results.push({ id: item.id, label: exceptionLabel(item.exception_type), ok: true })
+        } catch (error) {
+          results.push({ id: item.id, label: exceptionLabel(item.exception_type), ok: false, reason: error.message || '批准失败' })
+        }
+      }
+      bulkResult.value = {
+        total: results.length,
+        success: results.filter(item => item.ok).length,
+        failed: results.filter(item => !item.ok).length,
+        items: results,
+      }
+      selectedIds.value = []
+      showToast(`批量处理完成：成功 ${bulkResult.value.success} 条，失败 ${bulkResult.value.failed} 条`, bulkResult.value.failed ? 'warning' : 'success')
+      await load()
+    } finally {
+      working.value = false
+    }
   }
 
   async function resolveAuditFinding(item) {
@@ -254,6 +305,10 @@ export function usePayrollExceptions() {
     working,
     editingId,
     form,
+    selectedIds,
+    selectableItems,
+    allSelectableSelected,
+    bulkResult,
     canPrepare,
     canApprove,
     parsed,
@@ -276,6 +331,9 @@ export function usePayrollExceptions() {
     edit,
     propose,
     approve,
+    toggleSelected,
+    toggleAllSelected,
+    bulkApprove,
     resolveAuditFinding
   }
 }

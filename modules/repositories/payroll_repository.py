@@ -615,16 +615,49 @@ class PayrollRepository:
         return dict(row) if row else None
 
     @staticmethod
-    def list_lines(batch_id, employee_id=None, db=None):
+    def list_lines(batch_id, employee_id=None, db=None, page=None, limit=None, employee_query='', status_filter='all'):
         db = resolve_db(db)
         clauses, params = ["el.batch_id=?"], [batch_id]
         if employee_id is not None:
             clauses.append("el.employee_id=?")
             params.append(employee_id)
-        return [dict(row) for row in db.execute(
-            "SELECT el.* FROM payroll_employee_lines el WHERE " + " AND ".join(clauses) +
-            " ORDER BY el.payable_wage_cents DESC,el.id", params
-        ).fetchall()]
+        query = str(employee_query or '').strip()
+        if query:
+            clauses.append("(el.employee_name_snapshot LIKE ? OR el.employee_no_snapshot LIKE ?)")
+            params.extend([f"%{query}%", f"%{query}%"])
+        if status_filter == 'negative':
+            clauses.append("el.payable_wage_cents<0")
+        elif status_filter == 'adjusted':
+            clauses.append("(el.bonus_cents<>0 OR el.allowance_cents<>0 OR el.deduction_cents<>0)")
+        sql = "SELECT el.* FROM payroll_employee_lines el WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY el.payable_wage_cents DESC,el.id"
+        if page is not None and limit is not None:
+            page = max(int(page), 1)
+            limit = max(1, min(int(limit), 200))
+            sql += " LIMIT ? OFFSET ?"
+            params.extend([limit, (page - 1) * limit])
+        return [dict(row) for row in db.execute(sql, params).fetchall()]
+
+    @staticmethod
+    def count_lines(batch_id, employee_id=None, employee_query='', status_filter='all', db=None):
+        db = resolve_db(db)
+        clauses, params = ["el.batch_id=?"], [batch_id]
+        if employee_id is not None:
+            clauses.append("el.employee_id=?")
+            params.append(employee_id)
+        query = str(employee_query or '').strip()
+        if query:
+            clauses.append("(el.employee_name_snapshot LIKE ? OR el.employee_no_snapshot LIKE ?)")
+            params.extend([f"%{query}%", f"%{query}%"])
+        if status_filter == 'negative':
+            clauses.append("el.payable_wage_cents<0")
+        elif status_filter == 'adjusted':
+            clauses.append("(el.bonus_cents<>0 OR el.allowance_cents<>0 OR el.deduction_cents<>0)")
+        row = db.execute(
+            "SELECT COUNT(*) AS total FROM payroll_employee_lines el WHERE " + " AND ".join(clauses),
+            params,
+        ).fetchone()
+        return int(row['total'])
 
     @staticmethod
     def list_negative_payable_lines(batch_id, db=None):
