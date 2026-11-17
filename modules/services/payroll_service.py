@@ -1253,7 +1253,7 @@ class PayrollWorkflowService:
         return result
 
     @staticmethod
-    def batch_detail(batch_id, employee_id=None):
+    def batch_detail(batch_id, employee_id=None, page=None, limit=None, employee_query='', status_filter='all'):
         db = BaseService.db()
         batch = PayrollRepository.get_batch(batch_id, db)
         if not batch:
@@ -1263,8 +1263,21 @@ class PayrollWorkflowService:
                 **PayrollWorkflowService.serialize_batch(batch),
                 "input_changed": PayrollCalculationService.input_changed(batch, db),
             },
-            "lines": PayrollRepository.list_lines(batch_id, employee_id, db),
-            "details": PayrollRepository.list_details(batch_id, employee_id, db),
+            "lines": PayrollRepository.list_lines(
+                batch_id, employee_id, db, page=page, limit=limit,
+                employee_query=employee_query, status_filter=status_filter,
+            ),
+            "lines_total": PayrollRepository.count_lines(
+                batch_id, employee_id, employee_query, status_filter, db,
+            ) if page is not None and limit is not None else None,
+            "page": page,
+            "limit": limit,
+            "employee_query": employee_query,
+            "status_filter": status_filter,
+            "details": (
+                PayrollRepository.list_details(batch_id, employee_id, db)
+                if page is None or limit is None else []
+            ),
             "exceptions": PayrollRepository.list_exceptions(batch_id=batch_id, db=db),
             "audit_findings": PayrollRepository.list_audit_findings(
                 batch_id=batch_id, current_only=True, db=db

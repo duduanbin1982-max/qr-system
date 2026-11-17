@@ -123,6 +123,29 @@ export function usePayrollSettlement() {
     reconciliationVersion: latestReconciliation.value?.run_version || '-',
   }))
 
+  const workflowSteps = [
+    { key: 'confirmed', label: '已确认' },
+    { key: 'exported', label: '支付清单' },
+    { key: 'receipting', label: '回执' },
+    { key: 'reconciled', label: '对账' },
+    { key: 'closed', label: '结账' },
+  ]
+  const workflowStepIndex = computed(() => {
+    const status = settlement.value?.status
+    if (status === 'not_exported') return 0
+    if (status === 'difference_pending') return 3
+    const index = workflowSteps.findIndex(item => item.key === status)
+    return index >= 0 ? index : 0
+  })
+  const nextActionLabel = computed(() => ({
+    not_exported: '下一步：生成正式支付清单',
+    exported: '下一步：上传财务支付回执',
+    receipting: '下一步：运行差异对账',
+    difference_pending: '下一步：处理阻断差异后重新对账',
+    reconciled: '下一步：确认金额后结账锁定',
+    closed: '流程已完成，当前批次已锁定',
+  }[settlement.value?.status] || '选择批次开始结算'))
+
   function money(cents) {
     return `¥${(Number(cents || 0) / 100).toFixed(2)}`
   }
@@ -402,6 +425,9 @@ export function usePayrollSettlement() {
     blockingFilter,
     employeeFilter,
     closeSummary,
+    workflowSteps,
+    workflowStepIndex,
+    nextActionLabel,
     loading,
     detailLoading,
     working,

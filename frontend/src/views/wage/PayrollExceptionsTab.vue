@@ -20,6 +20,17 @@
         <button class="btn-default btn-sm" @click="load">刷新</button>
       </div>
     </div>
+    <div v-if="canApprove && selectableItems.length" class="bulk-exception-toolbar">
+      <label><input type="checkbox" :checked="allSelectableSelected" @change="toggleAllSelected"> 全选待审批</label>
+      <span>已选 {{ selectedIds.length }} 条</span>
+      <button class="btn-primary btn-sm" :disabled="working || !selectedIds.length" @click="bulkApprove">集中批准</button>
+    </div>
+    <div v-if="bulkResult" class="bulk-result-panel" role="status">
+      <strong>本次处理：成功 {{ bulkResult.success }} 条，失败 {{ bulkResult.failed }} 条</strong>
+      <ul v-if="bulkResult.failed">
+        <li v-for="item in bulkResult.items.filter(row => !row.ok)" :key="item.id">{{ item.label }} #{{ item.id }}：{{ item.reason }}</li>
+      </ul>
+    </div>
     <section class="audit-findings-section" aria-labelledby="audit-findings-title">
       <div class="audit-section-heading">
         <h4 id="audit-findings-title">计算审计异常</h4>
@@ -69,10 +80,11 @@
       <div v-if="loading" class="exception-empty">加载中...</div>
       <div v-else-if="!items.length" class="exception-empty">当前筛选条件下没有待处理工价异常</div>
       <table v-else class="data-table exception-table">
-        <thead><tr><th>批次</th><th>员工</th><th>报工</th><th>异常</th><th>核定工价</th><th>返工倍率</th><th>状态</th><th>操作</th></tr></thead>
+          <thead><tr><th>选择</th><th>批次</th><th>员工</th><th>报工</th><th>异常</th><th>核定工价</th><th>返工倍率</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>
           <template v-for="item in items" :key="item.id">
             <tr>
+              <td><input v-if="canApprove && item.status==='proposed'" type="checkbox" :checked="selectedIds.includes(item.id)" :aria-label="`选择异常 ${item.id}`" @change="toggleSelected(item.id)"></td>
               <td>{{ item.payroll_month }} / V{{ item.version }}</td>
               <td>{{ item.employee_name || snapshot(item).employee_name || '-' }}<small>{{ item.employee_no || '' }}</small></td>
               <td>{{ snapshot(item).order_no || '-' }}<small>{{ snapshot(item).process_name || '-' }} · {{ snapshot(item).quantity || 0 }} 件</small></td>
@@ -86,7 +98,7 @@
               </td>
             </tr>
             <tr v-if="editingId===item.id" class="proposal-row">
-              <td colspan="8">
+              <td colspan="9">
                 <div class="proposal-form">
                   <label>核定工价（元）<input v-model="form.unitPrice" type="number" min="0.0001" step="0.0001" class="form-input" :placeholder="item.exception_type==='missing_rework_rate'?'可沿用已有工价':'必填'"></label>
                   <label>返工倍率（%）<input v-model="form.reworkPercent" type="number" min="0" max="100" step="0.01" class="form-input" :disabled="snapshot(item).type!=='rework'"></label>
@@ -120,6 +132,10 @@ const {
   working,
   editingId,
   form,
+  selectedIds,
+  selectableItems,
+  allSelectableSelected,
+  bulkResult,
   canPrepare,
   canApprove,
   parsed,
@@ -142,6 +158,9 @@ const {
   edit,
   propose,
   approve,
+  toggleSelected,
+  toggleAllSelected,
+  bulkApprove,
   resolveAuditFinding
 } = usePayrollExceptions()
 </script>
@@ -149,4 +168,5 @@ const {
 <style scoped>
 .exception-toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:12px}.exception-toolbar h3{margin:0;font-size:18px}.exception-toolbar p{margin:4px 0 0;color:var(--text-placeholder);font-size:12px}.exception-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.exception-actions .form-input{width:145px}.audit-history-toggle{display:flex;align-items:center;gap:6px;white-space:nowrap;color:var(--text-secondary);font-size:12px}.audit-findings-section{margin:0 0 16px}.audit-section-heading{display:flex;align-items:center;justify-content:space-between;margin:0 0 8px}.audit-section-heading h4{margin:0;font-size:15px}.audit-section-heading span{color:var(--text-placeholder);font-size:12px}.audit-findings-table-wrap{overflow-x:auto;border:1px solid var(--border-color);border-radius:6px}.audit-findings-table{width:100%;min-width:1050px}.audit-findings-table small{display:block;margin-top:3px;color:var(--text-placeholder)}.finding-basis{max-width:420px;white-space:normal}.finding-basis p{margin:0}.finding-basis details{margin-top:5px;color:var(--text-secondary);font-size:12px}.finding-basis summary{cursor:pointer;color:var(--primary)}.finding-basis ul{margin:5px 0 0;padding-left:18px}.finding-review{display:grid;grid-template-columns:minmax(140px,1fr) auto;gap:6px;min-width:250px}.severity-blocking,.blocking-guidance{color:var(--danger)!important}.severity-review{color:var(--warning)!important}.exception-table-wrap{padding:0;overflow-x:auto;border-radius:8px}.exception-table{width:100%;min-width:920px}.exception-table small{display:block;margin-top:2px;color:var(--text-placeholder)}.exception-empty{text-align:center;padding:32px;color:var(--text-placeholder)}.exception-status{display:inline-block;padding:2px 7px;border-radius:4px;background:var(--bg-secondary);font-size:12px}.status-proposed{color:var(--primary);background:var(--primary-light)}.status-approved,.status-resolved{color:var(--success);background:var(--success-light)}.status-rejected{color:var(--danger);background:var(--danger-light)}.proposal-row td{background:var(--bg-secondary)}.proposal-form{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}.proposal-form label{display:flex;flex-direction:column;gap:4px;color:var(--text-placeholder);font-size:12px}.proposal-form .form-input{width:150px}.proposal-form .reason{flex:1;min-width:220px}.proposal-form .reason .form-input{width:100%}@media(max-width:760px){.exception-toolbar{flex-direction:column}.exception-actions{width:100%;flex-wrap:wrap}.exception-actions .form-input{width:auto;min-width:130px}}
 .finding-review{grid-template-columns:minmax(140px,1fr) minmax(160px,1fr) auto;min-width:390px}
+.bulk-exception-toolbar{display:flex;align-items:center;gap:12px;padding:10px 12px;margin-bottom:10px;border:1px solid var(--border-light);background:var(--bg-secondary);font-size:12px}.bulk-result-panel{padding:10px 12px;margin-bottom:10px;border-left:3px solid var(--primary);background:var(--primary-light);font-size:12px}.bulk-result-panel ul{margin:6px 0 0;padding-left:18px}
 </style>
