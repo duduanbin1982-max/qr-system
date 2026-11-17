@@ -66,16 +66,13 @@
             <td>{{ batch.prepared_by_name || batch.prepared_user_name || '-' }}</td>
             <td>
               <div class="payroll-row-actions">
-                <button class="btn-primary btn-sm" :disabled="working || primaryAction(batch).disabled" @click="runPrimaryAction(batch)">{{ primaryAction(batch).label }}</button>
-                <details class="payroll-more-actions">
-                  <summary class="btn-default btn-sm">更多</summary>
-                  <div class="payroll-more-menu">
-                    <button class="btn-default btn-sm" @click="openBatch(batch)">查看</button>
-                    <button v-if="canPrepare && editable(batch)" class="btn-default btn-sm" :disabled="working" @click="regenerate(batch)">重算</button>
-                    <button v-if="canExport && ['locked','confirmed'].includes(batch.status)" class="btn-default btn-sm" @click="exportBatch(batch)">下载预览</button>
-                    <button v-if="canPrepare && canRevise(batch)" class="btn-default btn-sm" :disabled="working" @click="revise(batch)">修订</button>
-                  </div>
-                </details>
+                <button class="btn-primary btn-sm" :data-testid="`batch-primary-action-${batch.id}`" :disabled="working || primaryAction(batch).disabled" @click="runPrimaryAction(batch)">{{ primaryAction(batch).label }}</button>
+                <div class="payroll-secondary-actions" aria-label="批次辅助操作">
+                  <button class="btn-default btn-sm" @click="openBatch(batch)">查看</button>
+                  <button v-if="canPrepare && editable(batch) && primaryAction(batch).key !== 'regenerate'" class="btn-default btn-sm" :disabled="working" @click="regenerate(batch)">重算</button>
+                  <button v-if="canExport && ['locked','confirmed'].includes(batch.status)" class="btn-default btn-sm" @click="exportBatch(batch)">下载预览</button>
+                  <button v-if="canPrepare && canRevise(batch)" class="btn-default btn-sm" :disabled="working" @click="revise(batch)">修订</button>
+                </div>
               </div>
             </td>
           </tr>
@@ -93,7 +90,7 @@
         <button class="btn-default btn-sm" @click="detail=null;selectedId=null">关闭</button>
       </div>
       <div class="payroll-detail-filters">
-        <input v-model="detailEmployeeQuery" class="form-input" placeholder="筛选姓名或工号" aria-label="工资明细员工筛选" @input="resetDetailPage">
+        <input v-model="detailEmployeeQuery" class="form-input" placeholder="筛选姓名或工号" aria-label="工资明细员工筛选" @input="scheduleDetailSearch">
         <select v-model="detailStatusFilter" class="form-input" aria-label="工资明细状态筛选" @change="resetDetailPage">
           <option value="all">全部明细</option>
           <option value="adjusted">含调整项</option>
@@ -213,6 +210,7 @@ const {
   changeSourcePage,
   changeDetailPage,
   resetDetailPage,
+  scheduleDetailSearch,
   primaryAction,
   runPrimaryAction,
   exportBatch
@@ -222,4 +220,5 @@ const {
 <style scoped>
 .payroll-toolbar,.payroll-detail-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:12px}.payroll-toolbar h3,.payroll-detail h3{margin:0;font-size:18px}.payroll-toolbar p,.payroll-detail p{margin:4px 0 0;color:var(--text-placeholder);font-size:12px}.payroll-toolbar-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.payroll-toolbar-actions .form-input{width:145px}.payroll-summary{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));border-top:1px solid var(--border-light);border-bottom:1px solid var(--border-light);margin-bottom:12px}.payroll-summary div{padding:12px 16px;border-right:1px solid var(--border-light)}.payroll-summary div:last-child{border-right:0}.payroll-summary span{display:block;color:var(--text-placeholder);font-size:12px}.payroll-summary strong{display:block;margin-top:4px;font-size:20px}.payroll-period-control{padding:12px 16px;margin-bottom:12px;border:1px solid var(--border-light);border-radius:8px;background:var(--bg-secondary)}.payroll-period-control-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.payroll-period-control-grid{display:grid;grid-template-columns:repeat(6,minmax(100px,1fr));gap:10px}.payroll-period-control-grid span{display:block;color:var(--text-placeholder);font-size:12px}.payroll-period-control-grid strong{display:block;margin-top:3px;font-size:14px}.payroll-period-control-note{margin:10px 0 0;padding:8px 10px;border-left:3px solid var(--warning);background:var(--warning-lighter);font-size:12px}.payroll-table-wrap{padding:0;overflow-x:auto;border-radius:8px}.payroll-table{width:100%;min-width:900px}.payroll-table tr.selected{background:var(--bg-hover)}.payroll-status{display:inline-block;padding:2px 7px;border-radius:4px;font-size:12px;background:var(--bg-secondary)}.status-exceptions_pending{color:var(--warning-dark);background:var(--warning-lighter)}.status-review_pending,.status-locked{color:var(--primary);background:var(--primary-light)}.status-confirmed{color:var(--success);background:var(--success-light)}.status-voided{color:var(--danger);background:var(--danger-light)}.payroll-row-actions{display:flex;gap:5px;min-width:190px;align-items:flex-start;flex-wrap:wrap}.payroll-more-actions{position:relative}.payroll-more-actions summary{list-style:none}.payroll-more-actions summary::-webkit-details-marker{display:none}.payroll-more-menu{position:absolute;right:0;z-index:2;display:grid;gap:4px;min-width:120px;padding:6px;background:var(--bg-primary);border:1px solid var(--border-light);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.12)}.payroll-empty{text-align:center;padding:48px;color:var(--text-placeholder)}.payroll-detail{margin-top:16px;padding-top:16px;border-top:2px solid var(--border-light);overflow-x:auto}.payroll-detail-filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0}.payroll-detail-filters .form-input{width:180px}.payroll-detail-count{color:var(--text-placeholder);font-size:12px}.payroll-detail-pagination,.payroll-source-pagination{display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 0;color:var(--text-placeholder);font-size:12px}.payroll-detail-note{padding:10px 12px;margin-top:10px;border-left:3px solid var(--warning);background:var(--warning-lighter);font-size:12px}.text-right{text-align:right}@media(max-width:800px){.payroll-toolbar{flex-direction:column}.payroll-summary{grid-template-columns:repeat(2,1fr)}.payroll-summary div:nth-child(2){border-right:0}.payroll-period-control-grid{grid-template-columns:repeat(2,minmax(120px,1fr))}.payroll-toolbar-actions{width:100%}}.payroll-source-drawer{position:fixed;inset:0;z-index:20;display:flex;justify-content:flex-end}.payroll-source-drawer-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.28)}.payroll-source-drilldown{position:relative;z-index:1;width:min(780px,100%);height:100%;margin:0;padding:20px;background:var(--bg-primary);box-shadow:-8px 0 24px rgba(0,0,0,.16);overflow:auto}.payroll-source-drilldown h4{margin:0;font-size:16px}
 .payroll-source-pagination{display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 0;color:var(--text-placeholder);font-size:12px}
+.payroll-secondary-actions{display:flex;gap:5px;flex-wrap:wrap}
 </style>

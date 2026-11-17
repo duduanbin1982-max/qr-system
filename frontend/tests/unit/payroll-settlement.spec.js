@@ -80,6 +80,10 @@ describe('payroll settlement workspace', () => {
     expect(wrapper.text()).toContain('2026-09 / V2')
     expect(wrapper.text()).toContain('¥125.00')
     expect(wrapper.get('[data-testid="create-payment-list"]').text()).toContain('生成支付清单')
+    expect(wrapper.get('[data-testid="settlement-next-action"]').text())
+      .toContain('下一步：生成正式支付清单')
+    expect(wrapper.get('[data-testid="settlement-next-action"] button').text())
+      .toBe('生成支付清单')
     expect(wrapper.find('[data-testid="close-settlement"]').exists()).toBe(false)
     wrapper.unmount()
   })
@@ -178,6 +182,21 @@ describe('payroll settlement workspace', () => {
     expect(wrapper.get('[data-testid="download-payment-list"]').attributes('href'))
       .toBe('/api/payroll/settlement/exports/71/download')
     expect(wrapper.text()).toContain('正式支付清单')
+    wrapper.unmount()
+  })
+
+  it('turns the upload-receipt step into a visible next action', async () => {
+    mocks.wages.getPayrollSettlement.mockResolvedValue(settlement({
+      status: 'exported',
+      current_export: { id: 71, export_version: 1, row_count: 4, content_sha256: 'abc123' },
+    }))
+    const wrapper = mountTab()
+    await flushPromises()
+
+    const nextAction = wrapper.get('[data-testid="settlement-next-action"]')
+    expect(nextAction.text()).toContain('下一步：上传财务支付回执')
+    expect(nextAction.get('[data-testid="settlement-next-action-upload"]').text())
+      .toBe('选择回执文件')
     wrapper.unmount()
   })
 
@@ -322,6 +341,7 @@ describe('payroll settlement workspace', () => {
     expect(versions.text()).toContain('已被替代')
     expect(wrapper.find('[data-testid="settlement-difference-61"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="settlement-difference-62"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="settlement-next-action"] button').text()).toBe('运行对账')
 
     await wrapper.get('[data-testid="difference-type-filter"]').setValue('underpaid')
     expect(wrapper.find('[data-testid="settlement-difference-61"]').exists()).toBe(true)
@@ -360,6 +380,7 @@ describe('payroll settlement workspace', () => {
     expect(wrapper.get('[data-testid="close-summary"]').text()).toContain('当前导出版本 V2')
     expect(wrapper.get('[data-testid="close-summary"]').text()).toContain('回执批次数量 2')
     expect(wrapper.get('[data-testid="close-summary"]').text()).toContain('对账运行版本 第 3 次')
+    expect(wrapper.get('[data-testid="settlement-next-action"] button').text()).toBe('结账锁定')
     await wrapper.get('[data-testid="close-settlement"]').trigger('click')
     await flushPromises()
 

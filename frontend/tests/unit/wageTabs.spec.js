@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   WAGE_TAB_DEFINITIONS,
+  getWageTabGroups,
   getVisibleWageTabs,
   resolveWageTab,
 } from '@/composables/wage/wageTabs.js'
@@ -18,6 +19,20 @@ describe('wage tab policy', () => {
   it('filters tabs by any granted permission', () => {
     const visible = getVisibleWageTabs(permission => permission === 'wages:view_self')
     expect(visible.map(tab => tab.id)).toEqual(['my'])
+  })
+
+  it('groups the visible tabs in the declared business order', () => {
+    const groups = getWageTabGroups(WAGE_TAB_DEFINITIONS)
+    expect(groups.map(group => group.label)).toEqual(['核算', '结算', '查询', '分析'])
+    expect(groups[0].tabs.map(tab => tab.label)).toEqual([
+      '批次台账', '异常处理', '调整项', '工价版本',
+    ])
+    expect(groups[1].tabs.map(tab => tab.label)).toEqual(['导出对账'])
+  })
+
+  it('uses the ledger as the default finance workspace entry', () => {
+    expect(resolveWageTab('', '', WAGE_TAB_DEFINITIONS)).toBe('ledger')
+    expect(resolveWageTab('', '', getVisibleWageTabs(() => false))).toBe('my')
   })
 
   it('exposes settlement to finance permissions but not employee self-view', () => {

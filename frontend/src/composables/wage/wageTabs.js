@@ -24,6 +24,21 @@ export function getVisibleWageTabs(canPermission) {
     .map(tab => ({ ...tab }))
 }
 
+export function getWageTabGroups(visibleTabs) {
+  const groups = []
+  const byGroup = new Map()
+  for (const tab of visibleTabs) {
+    const group = tab.group || '其他'
+    if (!byGroup.has(group)) {
+      const item = { id: group, label: group, tabs: [] }
+      byGroup.set(group, item)
+      groups.push(item)
+    }
+    byGroup.get(group).tabs.push(tab)
+  }
+  return groups
+}
+
 export function resolveWageTab(requestedTab, storedTab, visibleTabs) {
   const allowed = new Set(visibleTabs.map(tab => tab.id))
   if (allowed.has(requestedTab)) return requestedTab

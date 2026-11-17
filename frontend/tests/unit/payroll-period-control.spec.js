@@ -209,4 +209,36 @@ describe('payroll period control', () => {
     expect(wrapper.text()).not.toContain('旧批次来源')
     wrapper.unmount()
   })
+
+  it('debounces employee search before reloading paginated details', async () => {
+    mocks.wages.listPayrollBatches.mockResolvedValue({
+      batches: [{ id: 7, payroll_month: '2026-09', version: 2, status: 'confirmed' }],
+    })
+    mocks.wages.getPayrollBatch = vi.fn().mockResolvedValue({
+      batch: { id: 7, payroll_month: '2026-09', version: 2, status: 'confirmed' },
+      lines: [], details: [], exceptions: [], audit_findings: [], lines_total: 0,
+    })
+    const wrapper = mount(PayrollLedgerTab)
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === '查看').trigger('click')
+    await flushPromises()
+    expect(mocks.wages.getPayrollBatch).toHaveBeenCalledTimes(1)
+
+    vi.useFakeTimers()
+    try {
+      const search = wrapper.get('[aria-label="工资明细员工筛选"]')
+      await search.setValue('张')
+      await search.setValue('张三')
+      await vi.advanceTimersByTimeAsync(299)
+      expect(mocks.wages.getPayrollBatch).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(mocks.wages.getPayrollBatch).toHaveBeenCalledTimes(2)
+      expect(mocks.wages.getPayrollBatch).toHaveBeenLastCalledWith(7, {
+        page: 1, limit: 50, status_filter: 'all', employee_query: '张三',
+      })
+    } finally {
+      vi.useRealTimers()
+      wrapper.unmount()
+    }
+  })
 })

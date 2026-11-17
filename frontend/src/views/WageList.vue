@@ -2,11 +2,14 @@
 <template>
 <div class="wage-page">
     <div class="wage-tab-groups wage-tab-nav" aria-label="工资核算导航">
-      <section v-for="group in tabGroups" :key="group.id" class="wage-tab-group">
-        <h2>{{ group.label }}</h2>
-        <div class="tab-nav wage-tab-nav">
+      <section v-for="group in tabGroups" :key="group.id" class="wage-tab-group" :aria-label="group.label">
+        <h2 :id="`wage-tab-group-${group.id}`">{{ group.label }}</h2>
+        <div class="tab-nav wage-tab-nav" role="group" :aria-labelledby="`wage-tab-group-${group.id}`">
           <button v-for="t in group.tabs" :key="t.id" @click="switchTab(t.id)"
+            :id="`wage-tab-${t.id}`"
             :aria-current="activeTab===t.id ? 'page' : undefined"
+            :tabindex="activeTab===t.id ? 0 : -1"
+            @keydown="handleTabKey"
             :style="{flex:'0 0 auto',whiteSpace:'nowrap',textAlign:'center',padding:'8px 12px',border:'none',borderRadius:'6px',cursor:'pointer',fontSize:'var(--text-sm)',fontWeight:600,transition:'all .2s',background:activeTab===t.id?'#fff':'transparent',color:activeTab===t.id?'var(--primary)':'var(--text-secondary)',boxShadow:activeTab===t.id?'0 1px 3px rgba(0,0,0,.08)':'none'}">
             {{ t.label }}
           </button>
@@ -49,12 +52,29 @@ import PayrollSettlementTab from '@/views/wage/PayrollSettlementTab.vue'
 import PayrollExceptionsTab from '@/views/wage/PayrollExceptionsTab.vue'
 import PriceVersionTab from '@/views/wage/PriceVersionTab.vue'
 import MyPayrollTab from '@/views/wage/MyPayrollTab.vue'
+import { nextTick } from 'vue'
 import { useWageWorkspace } from '@/composables/wage/useWageWorkspace.js'
 
 export default {
   components: { PayrollLedgerTab, PayrollSettlementTab, PayrollExceptionsTab, PriceVersionTab, MyPayrollTab, PieceworkTab, MonthlyTab, ProcessWageTab, CompareTab, AdjustmentTab, TrendTab, PositionTab, PredictTab },
   setup() {
-    return useWageWorkspace()
+    const workspace = useWageWorkspace()
+    function handleTabKey(event) {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+      const tabs = workspace.tabGroups.value.flatMap(group => group.tabs)
+      const currentIndex = tabs.findIndex(tab => tab.id === workspace.activeTab.value)
+      if (currentIndex < 0) return
+      event.preventDefault()
+      let nextIndex = currentIndex
+      if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
+      if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length
+      if (event.key === 'Home') nextIndex = 0
+      if (event.key === 'End') nextIndex = tabs.length - 1
+      const nextTab = tabs[nextIndex]
+      workspace.switchTab(nextTab.id)
+      nextTick(() => document.getElementById(`wage-tab-${nextTab.id}`)?.focus())
+    }
+    return { ...workspace, handleTabKey }
   }
 }
 </script>
