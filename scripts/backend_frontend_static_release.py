@@ -341,6 +341,31 @@ PINNED_PAYROLL_SOURCE_SNAPSHOT_CONTROL_TRANSITIONS = {
         ("100644", "blob", "a949c6f14d1f2850b19aa2f31bbdd81120dca8c0"),
     ),
 }
+# PR #189 pins the payroll UI/UX business merge. Admit only the reviewed
+# payroll test updates and cumulative release-control transition for this
+# exact production-to-merge pair.
+PAYROLL_UI_UX_BASELINE = "96f8d3baf4e170ae5c0fce95f280ba077b956101"
+PAYROLL_UI_UX_TARGET = "8da168bde3bd2d51bff5594f7b40aa17f71809f9"
+PINNED_PAYROLL_UI_UX_SUPPORT_TRANSITIONS = {
+    "frontend/tests/unit/payroll-period-control.spec.js": (
+        ("100644", "blob", "5056f2aa6313f5e3ded81b7a6ee1a2898495c62d"),
+        ("100644", "blob", "2d5161850c0968536b71d959dbf829772998a600"),
+    ),
+    "frontend/tests/unit/payroll-ui-ux.spec.js": (
+        None,
+        ("100644", "blob", "16ec5c3f934a745c2100ec5c8dec5373053737bb"),
+    ),
+    "tests/test_backend_frontend_static_release.py": (
+        ("100644", "blob", "180060b23bab8ac6f06fb19e72bde479346712ad"),
+        ("100644", "blob", "04860893487e13b4116426947ce6f65a054f676f"),
+    ),
+}
+PINNED_PAYROLL_UI_UX_CONTROL_TRANSITIONS = {
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "a949c6f14d1f2850b19aa2f31bbdd81120dca8c0"),
+        ("100644", "blob", "3f62605467a3b2a24afbc56352a352d0163bb020"),
+    ),
+}
 # PR #176 introduces the V97 payroll-settlement workflow. The migration-aware
 # launcher consumes these exact support/control transitions; the ordinary
 # backend/static launcher continues to reject migration paths and V96->V97.
@@ -539,6 +564,13 @@ def _validate_support_transition(repository, before, target, path):
             f"payroll source-snapshot support exception requires the reviewed baseline and target: {path}",
         ),
         (
+            "payroll UI/UX",
+            PINNED_PAYROLL_UI_UX_SUPPORT_TRANSITIONS,
+            PAYROLL_UI_UX_BASELINE,
+            PAYROLL_UI_UX_TARGET,
+            f"payroll UI/UX support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
             "payroll settlement",
             PINNED_PAYROLL_SETTLEMENT_SUPPORT_TRANSITIONS,
             PAYROLL_SETTLEMENT_BASELINE,
@@ -702,6 +734,19 @@ def _validate_payroll_source_snapshot_control_transition(repository, before, tar
         raise RuntimeError(f"payroll source-snapshot release-control mode/blob transition mismatch: {path}")
 
 
+def _validate_payroll_ui_ux_control_transition(repository, before, target, path):
+    if (before, target) != (PAYROLL_UI_UX_BASELINE, PAYROLL_UI_UX_TARGET):
+        raise RuntimeError(
+            f"payroll UI/UX release-control transition requires the reviewed baseline and target: {path}"
+        )
+    expected_before, expected_target = PINNED_PAYROLL_UI_UX_CONTROL_TRANSITIONS[path]
+    if (
+        _tree_entry(repository, before, path) != expected_before
+        or _tree_entry(repository, target, path) != expected_target
+    ):
+        raise RuntimeError(f"payroll UI/UX release-control mode/blob transition mismatch: {path}")
+
+
 def _validate_payroll_settlement_control_transition(repository, before, target, path):
     if (before, target) != (PAYROLL_SETTLEMENT_BASELINE, PAYROLL_SETTLEMENT_TARGET):
         raise RuntimeError(
@@ -772,6 +817,12 @@ def _validate_paths(repository, before, target, changed):
             )
             continue
         if (
+            normalized in PINNED_PAYROLL_UI_UX_CONTROL_TRANSITIONS
+            and (before, target) == (PAYROLL_UI_UX_BASELINE, PAYROLL_UI_UX_TARGET)
+        ):
+            _validate_payroll_ui_ux_control_transition(repository, before, target, normalized)
+            continue
+        if (
             normalized in PINNED_PAYROLL_SETTLEMENT_CONTROL_TRANSITIONS
             and (before, target) == (PAYROLL_SETTLEMENT_BASELINE, PAYROLL_SETTLEMENT_TARGET)
         ):
@@ -789,6 +840,7 @@ def _validate_paths(repository, before, target, changed):
             or normalized in PINNED_PAYROLL_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_PERIOD_CONTROL_TRANSITIONS
             or normalized in PINNED_PAYROLL_B3_SOURCE_DRILLDOWN_SUPPORT_TRANSITIONS
+            or normalized in PINNED_PAYROLL_UI_UX_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_SETTLEMENT_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_RISK_CLOSURE_TRANSITIONS
             or normalized in PINNED_ORDERS_SUPPORT_TRANSITIONS
