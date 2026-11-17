@@ -4,11 +4,10 @@
     <div class="wage-tab-groups wage-tab-nav" aria-label="工资核算导航">
       <section v-for="group in tabGroups" :key="group.id" class="wage-tab-group" :aria-label="group.label">
         <h2 :id="`wage-tab-group-${group.id}`">{{ group.label }}</h2>
-        <div class="tab-nav wage-tab-nav" role="tablist" :aria-labelledby="`wage-tab-group-${group.id}`">
-          <button v-for="t in group.tabs" :key="t.id" role="tab" @click="switchTab(t.id)"
+        <div class="tab-nav wage-tab-nav" role="group" :aria-labelledby="`wage-tab-group-${group.id}`">
+          <button v-for="t in group.tabs" :key="t.id" @click="switchTab(t.id)"
             :id="`wage-tab-${t.id}`"
-            :aria-controls="`wage-tabpanel-${t.id}`"
-            :aria-selected="activeTab===t.id"
+            :aria-current="activeTab===t.id ? 'page' : undefined"
             :tabindex="activeTab===t.id ? 0 : -1"
             @keydown="handleTabKey"
             :style="{flex:'0 0 auto',whiteSpace:'nowrap',textAlign:'center',padding:'8px 12px',border:'none',borderRadius:'6px',cursor:'pointer',fontSize:'var(--text-sm)',fontWeight:600,transition:'all .2s',background:activeTab===t.id?'#fff':'transparent',color:activeTab===t.id?'var(--primary)':'var(--text-secondary)',boxShadow:activeTab===t.id?'0 1px 3px rgba(0,0,0,.08)':'none'}">
@@ -18,27 +17,24 @@
       </section>
     </div>
 
-    <PayrollLedgerTab v-if="activeTab==='ledger'" id="wage-tabpanel-ledger" role="tabpanel" :aria-labelledby="`wage-tab-${activeTab}`" />
-    <PayrollSettlementTab v-if="activeTab==='settlement'" id="wage-tabpanel-settlement" role="tabpanel" :aria-labelledby="`wage-tab-${activeTab}`" />
-    <PayrollExceptionsTab v-if="activeTab==='exceptions'" id="wage-tabpanel-exceptions" role="tabpanel" :aria-labelledby="`wage-tab-${activeTab}`" />
+    <PayrollLedgerTab v-if="activeTab==='ledger'" />
+    <PayrollSettlementTab v-if="activeTab==='settlement'" />
+    <PayrollExceptionsTab v-if="activeTab==='exceptions'" />
     <PriceVersionTab
       v-if="activeTab==='priceversions'"
-      id="wage-tabpanel-priceversions"
-      role="tabpanel"
-      :aria-labelledby="`wage-tab-${activeTab}`"
       :route-version-id="priceIntent.route_version_id"
       :process-version-id="priceIntent.process_version_id"
       :create-intent="priceIntent.create_price"
     />
-    <MyPayrollTab v-if="activeTab==='my'" id="wage-tabpanel-my" role="tabpanel" :aria-labelledby="`wage-tab-${activeTab}`" />
-    <PieceworkTab v-if="activeTab==='piece'" id="wage-tabpanel-piece" role="tabpanel" :aria-labelledby="`wage-tab-${activeTab}`" />
-    <MonthlyTab v-if="activeTab==='monthly'" id="wage-tabpanel-monthly" role="tabpanel" :aria-labelledby="`wage-tab-${activeTab}`" :tab-active="activeTab" />
-    <ProcessWageTab v-if="activeTab==='process'" id="wage-tabpanel-process" role="tabpanel" :aria-labelledby="`wage-tab-${activeTab}`" :tab-active="activeTab" />
-    <CompareTab v-if="activeTab==='compare'" id="wage-tabpanel-compare" role="tabpanel" :aria-labelledby="`wage-tab-${activeTab}`" :tab-active="activeTab" />
-    <AdjustmentTab v-if="activeTab==='adjustment'" id="wage-tabpanel-adjustment" role="tabpanel" :aria-labelledby="`wage-tab-${activeTab}`" />
-    <TrendTab v-if="activeTab==='trend'" id="wage-tabpanel-trend" role="tabpanel" :aria-labelledby="`wage-tab-${activeTab}`" :tab-active="activeTab" />
-    <PositionTab v-if="activeTab==='position'" id="wage-tabpanel-position" role="tabpanel" :aria-labelledby="`wage-tab-${activeTab}`" :tab-active="activeTab" />
-    <PredictTab v-if="activeTab==='predict'" id="wage-tabpanel-predict" role="tabpanel" :aria-labelledby="`wage-tab-${activeTab}`" :tab-active="activeTab" />
+    <MyPayrollTab v-if="activeTab==='my'" />
+    <PieceworkTab v-if="activeTab==='piece'" />
+    <MonthlyTab v-if="activeTab==='monthly'" :tab-active="activeTab" />
+    <ProcessWageTab v-if="activeTab==='process'" :tab-active="activeTab" />
+    <CompareTab v-if="activeTab==='compare'" :tab-active="activeTab" />
+    <AdjustmentTab v-if="activeTab==='adjustment'" />
+    <TrendTab v-if="activeTab==='trend'" :tab-active="activeTab" />
+    <PositionTab v-if="activeTab==='position'" :tab-active="activeTab" />
+    <PredictTab v-if="activeTab==='predict'" :tab-active="activeTab" />
 </div>
 </template>
 
