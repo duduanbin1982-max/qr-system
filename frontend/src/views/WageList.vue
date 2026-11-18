@@ -3,7 +3,15 @@
 <div class="wage-page">
     <div class="wage-tab-groups wage-tab-nav" aria-label="工资核算导航">
       <section v-for="group in tabGroups" :key="group.id" class="wage-tab-group" :aria-label="group.label">
-        <h2 :id="`wage-tab-group-${group.id}`">{{ group.label }}</h2>
+        <button
+          type="button"
+          class="wage-tab-group-heading"
+          :class="{ active: activeGroupId === group.id }"
+          :id="`wage-tab-group-${group.id}`"
+          :aria-controls="`wage-tab-${group.tabs[0]?.id}`"
+          :aria-pressed="activeGroupId === group.id"
+          @click="activateGroup(group)"
+        >{{ group.label }}</button>
         <div class="tab-nav wage-tab-nav" role="group" :aria-labelledby="`wage-tab-group-${group.id}`">
           <button v-for="t in group.tabs" :key="t.id" @click="switchTab(t.id)"
             :id="`wage-tab-${t.id}`"
@@ -52,13 +60,21 @@ import PayrollSettlementTab from '@/views/wage/PayrollSettlementTab.vue'
 import PayrollExceptionsTab from '@/views/wage/PayrollExceptionsTab.vue'
 import PriceVersionTab from '@/views/wage/PriceVersionTab.vue'
 import MyPayrollTab from '@/views/wage/MyPayrollTab.vue'
-import { nextTick } from 'vue'
+import { computed, nextTick } from 'vue'
 import { useWageWorkspace } from '@/composables/wage/useWageWorkspace.js'
 
 export default {
   components: { PayrollLedgerTab, PayrollSettlementTab, PayrollExceptionsTab, PriceVersionTab, MyPayrollTab, PieceworkTab, MonthlyTab, ProcessWageTab, CompareTab, AdjustmentTab, TrendTab, PositionTab, PredictTab },
   setup() {
     const workspace = useWageWorkspace()
+    const tabGroups = computed(() => workspace.tabGroups.value)
+    const activeGroupId = computed(() => workspace.tabGroups.value.find(
+      group => group.tabs.some(tab => tab.id === workspace.activeTab.value),
+    )?.id || '')
+    function activateGroup(group) {
+      const firstTab = group.tabs[0]
+      if (firstTab) workspace.switchTab(firstTab.id)
+    }
     function handleTabKey(event) {
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
       const tabs = workspace.tabGroups.value.flatMap(group => group.tabs)
@@ -74,11 +90,11 @@ export default {
       workspace.switchTab(nextTab.id)
       nextTick(() => document.getElementById(`wage-tab-${nextTab.id}`)?.focus())
     }
-    return { ...workspace, handleTabKey }
+    return { ...workspace, tabGroups, activeGroupId, activateGroup, handleTabKey }
   }
 }
 </script>
 
 <style scoped>
-.wage-page{width:100%;max-width:100%;min-width:0;padding:var(--space-6);overflow:hidden}.wage-tab-groups{display:flex;gap:10px;align-items:flex-end;margin-bottom:var(--space-5);overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin}.wage-tab-group{min-width:max-content}.wage-tab-group h2{margin:0 0 4px;padding:0 4px;color:var(--text-placeholder);font-size:11px;font-weight:700;letter-spacing:0}.wage-tab-nav{display:flex;max-width:100%;gap:2px;padding:4px;border-radius:8px;background:var(--bg-secondary);scrollbar-width:thin}.wage-tab-nav button span{margin-right:4px}@media(max-width:768px){.wage-page{padding:var(--space-4) 12px}.wage-tab-groups{margin-bottom:var(--space-4);align-items:flex-start}}
+.wage-page{width:100%;max-width:100%;min-width:0;padding:var(--space-6);overflow:hidden}.wage-tab-groups{display:flex;gap:10px;align-items:flex-end;margin-bottom:var(--space-5);overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin}.wage-tab-group{min-width:max-content}.wage-tab-group-heading{margin:0 0 4px;padding:2px 6px;border:0;border-radius:4px;background:transparent;color:var(--text-placeholder);font-size:11px;font-weight:700;letter-spacing:0;cursor:pointer}.wage-tab-group-heading:hover,.wage-tab-group-heading.active{background:var(--bg-secondary);color:var(--primary)}.wage-tab-nav{display:flex;max-width:100%;gap:2px;padding:4px;border-radius:8px;background:var(--bg-secondary);scrollbar-width:thin}.wage-tab-nav button span{margin-right:4px}@media(max-width:768px){.wage-page{padding:var(--space-4) 12px}.wage-tab-groups{margin-bottom:var(--space-4);align-items:flex-start}}
 </style>

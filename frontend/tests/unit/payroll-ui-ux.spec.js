@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -17,9 +17,25 @@ vi.mock('@/lib/auth.js', () => ({
 vi.mock('@/lib/store.js', () => ({ showToast: mocks.toast }))
 vi.mock('@/lib/router.js', () => ({ navigate: mocks.navigate, router: { params: {} } }))
 vi.mock('@/composables/useWage.js', () => ({ useWage: () => ({ switchTab: mocks.switchTab }) }))
+vi.mock('@/composables/wage/useWageWorkspace.js', () => ({
+  useWageWorkspace: () => ({
+    activeTab: { value: 'ledger' },
+    tabGroups: {
+      value: [
+        { id: '核算', label: '核算', tabs: [{ id: 'ledger', label: '批次台账' }, { id: 'exceptions', label: '异常处理' }] },
+        { id: '结算', label: '结算', tabs: [{ id: 'settlement', label: '导出对账' }] },
+        { id: '查询', label: '查询', tabs: [{ id: 'my', label: '我的工资' }] },
+        { id: '分析', label: '分析', tabs: [{ id: 'monthly', label: '月度汇总' }] },
+      ],
+    },
+    switchTab: mocks.switchTab,
+    priceIntent: {},
+  }),
+}))
 
 import PayrollExceptionsTab from '@/views/wage/PayrollExceptionsTab.vue'
 import PayrollLedgerTab from '@/views/wage/PayrollLedgerTab.vue'
+import WageList from '@/views/WageList.vue'
 
 describe('payroll UI/UX workflow controls', () => {
   beforeEach(() => {
@@ -108,6 +124,24 @@ describe('payroll UI/UX workflow controls', () => {
 
     expect(mocks.switchTab).toHaveBeenCalledWith('settlement')
     expect(mocks.navigate).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['核算', 'ledger'],
+    ['结算', 'settlement'],
+    ['查询', 'my'],
+    ['分析', 'monthly'],
+  ])('activates the %s group entry tab', async (label, tabId) => {
+    const wrapper = shallowMount(WageList)
+    const headings = wrapper.findAll('button.wage-tab-group-heading')
+    const heading = headings.find(button => button.text() === label)
+
+    expect(heading).toBeTruthy()
+    expect(headings[0].attributes('aria-pressed')).toBe('true')
+    await heading.trigger('click')
+
+    expect(mocks.switchTab).toHaveBeenCalledWith(tabId)
     wrapper.unmount()
   })
 })
