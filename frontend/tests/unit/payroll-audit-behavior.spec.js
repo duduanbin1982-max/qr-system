@@ -29,6 +29,9 @@ function render(component, options) {
 function button(wrapper, label) {
   return wrapper.findAll('button').find(item => item.text() === label)
 }
+function lastButton(wrapper, label) {
+  return wrapper.findAll('button').filter(item => item.text() === label).at(-1)
+}
 function state(wrapper) { return wrapper.vm.$.setupState }
 function batch(overrides = {}) {
   return {
@@ -225,7 +228,7 @@ describe('payroll piecework filters and pagination', () => {
         hideZero: () => wrapper.findAll('input[type="checkbox"]')[1].setValue(true),
         dateFrom: () => wrapper.find('input[aria-label="预估开始日期"]').setValue('2026-09-01'),
         dateTo: () => wrapper.find('input[aria-label="预估结束日期"]').setValue('2026-09-30'),
-        query: () => button(wrapper, '查询').trigger('click'),
+        query: () => lastButton(wrapper, '查询').trigger('click'),
       }
       await filters[filter]()
       await flushPromises()
