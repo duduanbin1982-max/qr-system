@@ -1823,3 +1823,91 @@ def test_reviewed_payroll_ui_ux_repair_control_transition_is_exact(monkeypatch):
             release.PAYROLL_UI_UX_REPAIR_TARGET,
             [path],
         )
+
+
+def test_reviewed_payroll_tab_group_support_is_exact():
+    repository = Path(__file__).resolve().parents[1]
+    for path, (expected_before, expected_target) in (
+        release.PINNED_PAYROLL_TAB_GROUP_SUPPORT_TRANSITIONS.items()
+    ):
+        assert release._tree_entry(
+            repository, release.PAYROLL_TAB_GROUP_BASELINE, path
+        ) == expected_before
+        assert release._tree_entry(
+            repository, release.PAYROLL_TAB_GROUP_TARGET, path
+        ) == expected_target
+        release._validate_paths(
+            repository,
+            release.PAYROLL_TAB_GROUP_BASELINE,
+            release.PAYROLL_TAB_GROUP_TARGET,
+            [path],
+        )
+
+    changed = release._git(
+        repository,
+        "diff",
+        "--name-only",
+        release.PAYROLL_TAB_GROUP_BASELINE,
+        release.PAYROLL_TAB_GROUP_TARGET,
+    ).splitlines()
+    release._validate_paths(
+        repository,
+        release.PAYROLL_TAB_GROUP_BASELINE,
+        release.PAYROLL_TAB_GROUP_TARGET,
+        changed,
+    )
+
+    with pytest.raises(RuntimeError, match="reviewed baseline and target"):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_TAB_GROUP_BASELINE,
+            release.PAYROLL_UI_UX_REPAIR_TARGET,
+            ["frontend/tests/unit/payroll-ui-ux.spec.js"],
+        )
+    with pytest.raises(RuntimeError):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_TAB_GROUP_BASELINE,
+            release.PAYROLL_TAB_GROUP_TARGET,
+            ["frontend/tests/unit/unreviewed-payroll-tab.spec.js"],
+        )
+
+
+def test_reviewed_payroll_tab_group_control_transition_is_exact(monkeypatch):
+    repository = Path(__file__).resolve().parents[1]
+    path = "scripts/backend_frontend_static_release.py"
+    expected_before, expected_target = (
+        release.PINNED_PAYROLL_TAB_GROUP_CONTROL_TRANSITIONS[path]
+    )
+    assert release._tree_entry(
+        repository, release.PAYROLL_TAB_GROUP_BASELINE, path
+    ) == expected_before
+    assert release._tree_entry(
+        repository, release.PAYROLL_TAB_GROUP_TARGET, path
+    ) == expected_target
+    release._validate_paths(
+        repository,
+        release.PAYROLL_TAB_GROUP_BASELINE,
+        release.PAYROLL_TAB_GROUP_TARGET,
+        [path],
+    )
+    with pytest.raises(RuntimeError):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_TAB_GROUP_BASELINE,
+            release.PAYROLL_UI_UX_REPAIR_TARGET,
+            [path],
+        )
+
+    monkeypatch.setitem(
+        release.PINNED_PAYROLL_TAB_GROUP_CONTROL_TRANSITIONS,
+        path,
+        (expected_before, ("100644", "blob", "0" * 40)),
+    )
+    with pytest.raises(RuntimeError, match="mode/blob transition mismatch"):
+        release._validate_paths(
+            repository,
+            release.PAYROLL_TAB_GROUP_BASELINE,
+            release.PAYROLL_TAB_GROUP_TARGET,
+            [path],
+        )

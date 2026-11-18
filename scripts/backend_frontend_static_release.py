@@ -399,6 +399,30 @@ PINNED_PAYROLL_UI_UX_REPAIR_CONTROL_TRANSITIONS = {
         ("100644", "blob", "cc9a9b5f5d6fec5849b2cd5fa09d20c0125dd47a"),
     ),
 }
+# PR #193 makes payroll TAB group headings functional. Admit only the reviewed
+# test support and cumulative release-control objects for this exact pair.
+PAYROLL_TAB_GROUP_BASELINE = "e0ea44d5211bb18205566925e8ce88467b2b3e5c"
+PAYROLL_TAB_GROUP_TARGET = "b897fcbe57ae61c134a6f49e5ad39e0d1b26b0d3"
+PINNED_PAYROLL_TAB_GROUP_SUPPORT_TRANSITIONS = {
+    "frontend/tests/unit/payroll-audit-behavior.spec.js": (
+        ("100644", "blob", "12a0ef71ac914866d30a373479d29bc47e9008ac"),
+        ("100644", "blob", "215ee8a6a0d8b90909dd1e22dfeb1ed13edbce88"),
+    ),
+    "frontend/tests/unit/payroll-ui-ux.spec.js": (
+        ("100644", "blob", "9f48ecd6976f448d1e93b1538d44eb54dc3c2fd4"),
+        ("100644", "blob", "908d052dc9405b82e7f955244c969a4a5722261b"),
+    ),
+    "tests/test_backend_frontend_static_release.py": (
+        ("100644", "blob", "86084f9ce72bed8396f5cabfeedb31708c79093c"),
+        ("100644", "blob", "0967e3e8ddd6201e243451ba0994c579c30d75f8"),
+    ),
+}
+PINNED_PAYROLL_TAB_GROUP_CONTROL_TRANSITIONS = {
+    "scripts/backend_frontend_static_release.py": (
+        ("100644", "blob", "cc9a9b5f5d6fec5849b2cd5fa09d20c0125dd47a"),
+        ("100644", "blob", "466ebdf872be6ed35bcc27e1b67469e00c54c38c"),
+    ),
+}
 # PR #176 introduces the V97 payroll-settlement workflow. The migration-aware
 # launcher consumes these exact support/control transitions; the ordinary
 # backend/static launcher continues to reject migration paths and V96->V97.
@@ -611,6 +635,13 @@ def _validate_support_transition(repository, before, target, path):
             f"payroll UI/UX repair support exception requires the reviewed baseline and target: {path}",
         ),
         (
+            "payroll TAB group",
+            PINNED_PAYROLL_TAB_GROUP_SUPPORT_TRANSITIONS,
+            PAYROLL_TAB_GROUP_BASELINE,
+            PAYROLL_TAB_GROUP_TARGET,
+            f"payroll TAB group support exception requires the reviewed baseline and target: {path}",
+        ),
+        (
             "payroll settlement",
             PINNED_PAYROLL_SETTLEMENT_SUPPORT_TRANSITIONS,
             PAYROLL_SETTLEMENT_BASELINE,
@@ -803,6 +834,19 @@ def _validate_payroll_ui_ux_repair_control_transition(repository, before, target
         raise RuntimeError(f"payroll UI/UX repair release-control mode/blob transition mismatch: {path}")
 
 
+def _validate_payroll_tab_group_control_transition(repository, before, target, path):
+    if (before, target) != (PAYROLL_TAB_GROUP_BASELINE, PAYROLL_TAB_GROUP_TARGET):
+        raise RuntimeError(
+            f"payroll TAB group release-control transition requires the reviewed baseline and target: {path}"
+        )
+    expected_before, expected_target = PINNED_PAYROLL_TAB_GROUP_CONTROL_TRANSITIONS[path]
+    if (
+        _tree_entry(repository, before, path) != expected_before
+        or _tree_entry(repository, target, path) != expected_target
+    ):
+        raise RuntimeError(f"payroll TAB group release-control mode/blob transition mismatch: {path}")
+
+
 def _validate_payroll_settlement_control_transition(repository, before, target, path):
     if (before, target) != (PAYROLL_SETTLEMENT_BASELINE, PAYROLL_SETTLEMENT_TARGET):
         raise RuntimeError(
@@ -887,6 +931,14 @@ def _validate_paths(repository, before, target, changed):
             )
             continue
         if (
+            normalized in PINNED_PAYROLL_TAB_GROUP_CONTROL_TRANSITIONS
+            and (before, target) == (PAYROLL_TAB_GROUP_BASELINE, PAYROLL_TAB_GROUP_TARGET)
+        ):
+            _validate_payroll_tab_group_control_transition(
+                repository, before, target, normalized
+            )
+            continue
+        if (
             normalized in PINNED_PAYROLL_SETTLEMENT_CONTROL_TRANSITIONS
             and (before, target) == (PAYROLL_SETTLEMENT_BASELINE, PAYROLL_SETTLEMENT_TARGET)
         ):
@@ -906,6 +958,7 @@ def _validate_paths(repository, before, target, changed):
             or normalized in PINNED_PAYROLL_B3_SOURCE_DRILLDOWN_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_UI_UX_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_UI_UX_REPAIR_SUPPORT_TRANSITIONS
+            or normalized in PINNED_PAYROLL_TAB_GROUP_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_SETTLEMENT_SUPPORT_TRANSITIONS
             or normalized in PINNED_PAYROLL_RISK_CLOSURE_TRANSITIONS
             or normalized in PINNED_ORDERS_SUPPORT_TRANSITIONS
